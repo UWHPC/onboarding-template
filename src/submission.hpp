@@ -17,7 +17,11 @@ inline void apply_stencil(const Grid& o, Grid& n) {
   const std::size_t R = o.rows(), C = o.cols();
   for (std::size_t i = 0; i < R; ++i) { n(i, 0) = o(i, 0); n(i, C - 1) = o(i, C - 1); }
   for (std::size_t j = 0; j < C; ++j) { n(0, j) = o(0, j); n(R - 1, j) = o(R - 1, j); }
+
+  // Basic OpenMP: parallelize over rows. Correct and race-free (each thread
+  // writes a distinct set of cells and only reads the old grid).
+  #pragma omp parallel for schedule(static)
   for (std::size_t i = 1; i < R - 1; ++i)
     for (std::size_t j = 1; j < C - 1; ++j)
-      n(i, j) = 0.5 * o(i, j) + 0.125 * (o(i-1, j) + o(i+1, j) + o(i, j-1) + o(i, j+1));
+      n(i, j) = 0.5 * o(i, j) + 0.125 * (o(i - 1, j) + o(i + 1, j) + o(i, j - 1) + o(i, j + 1));
 }
