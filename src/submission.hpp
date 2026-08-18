@@ -10,7 +10,7 @@ public:
   double& operator()(std::size_t i, std::size_t j)       { return c_[i * cols_ + j]; }
   double  operator()(std::size_t i, std::size_t j) const { return c_[i * cols_ + j]; }
   std::size_t rows() const { return rows_; }
-  std::size_t cols() const { return cols_; }
+  std::size_t cols() const { return cols_; }a
 };
 
 // BROKEN ON PURPOSE (for testing the failure path): this only updates a square
