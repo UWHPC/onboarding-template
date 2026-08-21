@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <stdexcept>
 #include <vector>
 
@@ -26,43 +25,18 @@ public:
 void apply_stencil(const Grid& old_grid, Grid& new_grid);
 
 
-inline std::size_t validate_dimension(std::size_t dimension) {
-  if (dimension == 0) {
-    throw std::invalid_argument("Grid dimensions must be positive");
-  }
-
-  return dimension;
-}
-
-
 inline Grid::Grid(std::size_t rows, std::size_t cols) 
-  : rows_(validate_dimension(rows)),
-    cols_(validate_dimension(cols)),
+  : rows_(rows),
+    cols_(cols),
     data_(rows * cols, 0.0) {}
 
 
 inline double& Grid::operator()(std::size_t i, std::size_t j) {
-  if (i >= rows_) {
-    throw std::out_of_range("Row index is out of range");
-  }
-
-  if (j >= cols_) {
-    throw std::out_of_range("Column index is out of range");
-  }
-
   return data_[i * cols_ + j];
 }
 
 
 inline double Grid::operator()(std::size_t i, std::size_t j) const {
-  if (i >= rows_) {
-    throw std::out_of_range("Row index is out of range");
-  }
-
-  if (j >= cols_) {
-    throw std::out_of_range("Column index is out of range");
-  }
-
   return data_[i * cols_ + j];
 }
 
@@ -78,15 +52,6 @@ inline std::size_t Grid::cols() const {
 
 
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
-  if (&old_grid == &new_grid) {
-    throw std::invalid_argument("old_grid and new_grid must be distinct");
-  }
-
-  if (old_grid.rows() != new_grid.rows() ||
-      old_grid.cols() != new_grid.cols()) {
-        throw std::invalid_argument("old_grid and new_grid must have the same dimensions");
-      }
-  
   const std::size_t rows = new_grid.rows();
   const std::size_t cols = new_grid.cols();
 
