@@ -82,6 +82,13 @@ public:
 static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, size_t end) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
+
+	if (M <= 2) {
+		if (start < end)
+			memcpy(&new_grid(start, 0), &old_grid.get(start, 0), (end - start) * M * sizeof(double));
+		return;
+	}
+
 	const size_t stride = 256 / 8 / sizeof(double);
 	const size_t T = (M - 2) % stride;
 
@@ -113,8 +120,10 @@ static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, s
 			_mm_storeu_pd(&new_grid(i, M - 1), _mm_loadu_pd(&old_grid.get(i, M - 1)));
 		}
 	}
-	new_grid(start, 0) = old_grid(start, 0);
-	new_grid(end - 1, M - 1) = old_grid(end - 1, M - 1);
+	if (start < end) {
+		new_grid(start, 0) = old_grid(start, 0);
+		new_grid(end - 1, M - 1) = old_grid(end - 1, M - 1);
+	}
 }
 
 struct ThreadInfo {
