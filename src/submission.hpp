@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <vector>
 #include <new>
+#include <utility>
 // Starter Grid for the 2D heat-diffusion problem.
 //
 // The evaluation harness uses operator() to set initial conditions and to read
@@ -44,6 +45,8 @@ Notes after Comments:
 // that it's typically used for when we reuse functions and stuff to work with different data types, even
 // though here we only using for doubles.
 // ::operator new() reserves raw memory which std::vector uses to construct/store doubles
+// by using view we can make it so that the stencil function does not need to own the whole grid object considering
+// its only using the simple values for calculations
 template <typename T, std::size_t Alignment>
 class AlignedAllocator
 {
@@ -110,44 +113,78 @@ public:
   {
     return cells_[i * stride_ + j];
   }
-  // will need these getters later as we cant access rows and cols as private variables
-  std::size_t getRows() const
+
+  std::pair<std::size_t, std::size_t> dimensions() const
   {
-    return rows_;
+    return {rows_, cols_};
+  }
+  // Expose raw storage for the optimized stencil loop.
+  // read the double from grid but const so we can't change
+  const double *data() const
+  {
+    return cells_.data();
+  }
+  // same pointer as above but without const so caller can change stored doubles
+  double *data()
+  {
+    return cells_.data();
   }
 
-  std::size_t getCols() const
+  std::size_t getStride() const
   {
-    return cols_;
+    return stride_;
   }
 };
+
+// Do the calculation in a helper:
+constexpr double five_point_stencil(
+    double center,
+    double above,
+    double below,
+    double left,
+    double right)
+{
+  return 0.5 * center +
+         0.125 * (above + below + left + right);
+}
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid &old_grid, Grid &new_grid)
 {
-  const std::size_t rows{old_grid.getRows()};
-  const std::size_t cols{old_grid.getCols()};
+  // get rows and cols in one instruction
+  const auto dimensions{old_grid.dimensions()};
+  const std::size_t rows{dimensions.first};
+  const std::size_t cols{dimensions.second};
 
   if (rows == 0 || cols == 0)
   {
     return;
   }
+  const std::size_t stride{old_grid.getStride()};
+
+  // ensuring no pointer aliasing, so compiler doesnt point to overlapping data
+  const double *__restrict old{old_grid.data()};
+  double *__restrict next{new_grid.data()};
+
+  const std::size_t bottom_row{(rows - 1) * stride};
 
   // Copy the top and bottom boundary rows.
-  for (std::size_t j = 0; j < cols; ++j)
+  for (std::size_t j{0}; j < cols; ++j)
   {
-    new_grid(0, j) = old_grid(0, j);
-    new_grid(rows - 1, j) = old_grid(rows - 1, j);
+    next[j] = old[j];
+    next[bottom_row + j] = old[bottom_row + j];
   }
 
   // Copy the left and right boundary columns.
   // Start at 1 and stop before the last row, since corners are already copied.
 
-  for (std::size_t i = 1; i < rows - 1; ++i)
+  for (std::size_t i{1}; i < rows - 1; ++i)
   {
-    new_grid(i, 0) = old_grid(i, 0);
-    new_grid(i, cols - 1) = old_grid(i, cols - 1);
+    const std::size_t row_start{i * stride};
+
+    next[row_start] = old[row_start];
+    next[row_start + cols - 1] = old[row_start + cols - 1];
   }
 
 // Calculate only non-boundary cells.
@@ -156,16 +193,21 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid)
 #pragma omp parallel for
   for (std::size_t i = 1; i < rows - 1; ++i)
   {
+    const std::size_t row_start{i * stride};
+
 #pragma omp simd
     for (std::size_t j = 1; j < cols - 1; ++j)
     {
+      const std::size_t index{row_start + j};
+
       // formula from onboarding page
-      new_grid(i, j) =
-          0.5 * old_grid(i, j) +
-          0.125 * (old_grid(i - 1, j) +
-                   old_grid(i + 1, j) +
-                   old_grid(i, j - 1) +
-                   old_grid(i, j + 1));
+      next[index] = five_point_stencil(
+          old[index],          // centre
+          old[index - stride], // above
+          old[index + stride], // below
+          old[index - 1],      // left
+          old[index + 1]       // right
+      );
     }
   }
 }
