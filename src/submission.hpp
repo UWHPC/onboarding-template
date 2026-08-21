@@ -76,6 +76,24 @@ public:
     );
   }
 };
+
+struct GridView
+{
+  const double *cells;
+  std::size_t rows;
+  std::size_t cols;
+  std::size_t stride;
+};
+
+// A writable borrowed view of grid storage.
+// It does not own the memory it points to.
+struct MutableGridView
+{
+  double *cells;
+  std::size_t rows;
+  std::size_t cols;
+  std::size_t stride;
+};
 class Grid
 {
 private:
@@ -114,25 +132,15 @@ public:
     return cells_[i * stride_ + j];
   }
 
-  std::pair<std::size_t, std::size_t> dimensions() const
+  GridView view() const
   {
-    return {rows_, cols_};
-  }
-  // Expose raw storage for the optimized stencil loop.
-  // read the double from grid but const so we can't change
-  const double *data() const
-  {
-    return cells_.data();
-  }
-  // same pointer as above but without const so caller can change stored doubles
-  double *data()
-  {
-    return cells_.data();
+    return {cells_.data(), rows_, cols_, stride_};
   }
 
-  std::size_t getStride() const
+  // Called on a writable Grid, such as new_grid.
+  MutableGridView view()
   {
-    return stride_;
+    return {cells_.data(), rows_, cols_, stride_};
   }
 };
 
@@ -147,49 +155,44 @@ constexpr double five_point_stencil(
   return 0.5 * center +
          0.125 * (above + below + left + right);
 }
-
-// Apply the five-point stencil over all interior points, copying the boundary
-// values unchanged from old_grid to new_grid. Implement your solution here.
-void apply_stencil(const Grid &old_grid, Grid &new_grid)
+void apply_stencil_view(
+    const GridView old,
+    MutableGridView next)
 {
-  // get rows and cols in one instruction
-  const auto dimensions{old_grid.dimensions()};
-  const std::size_t rows{dimensions.first};
-  const std::size_t cols{dimensions.second};
-
-  if (rows == 0 || cols == 0)
+  if (old.rows == 0 || old.cols == 0)
   {
     return;
   }
-  const std::size_t stride{old_grid.getStride()};
 
-  // ensuring no pointer aliasing, so compiler doesnt point to overlapping data
-  const double *__restrict old{old_grid.data()};
-  double *__restrict next{new_grid.data()};
+  // The views are tiny; copying them copies only pointers/sizes, not grid data.
+  const std::size_t rows{old.rows};
+  const std::size_t cols{old.cols};
+  const std::size_t stride{old.stride};
 
+  // Promise that input and output storage does not overlap.
+  const double *__restrict old_cells{old.cells};
+  double *__restrict next_cells{next.cells};
+
+  // Copy top and bottom boundaries.
   const std::size_t bottom_row{(rows - 1) * stride};
 
-  // Copy the top and bottom boundary rows.
-  for (std::size_t j{0}; j < cols; ++j)
+  for (std::size_t j = 0; j < cols; ++j)
   {
-    next[j] = old[j];
-    next[bottom_row + j] = old[bottom_row + j];
+    next_cells[j] = old_cells[j];
+    next_cells[bottom_row + j] = old_cells[bottom_row + j];
   }
 
-  // Copy the left and right boundary columns.
-  // Start at 1 and stop before the last row, since corners are already copied.
-
-  for (std::size_t i{1}; i < rows - 1; ++i)
+  // Copy left and right boundaries.
+  for (std::size_t i = 1; i < rows - 1; ++i)
   {
     const std::size_t row_start{i * stride};
 
-    next[row_start] = old[row_start];
-    next[row_start + cols - 1] = old[row_start + cols - 1];
+    next_cells[row_start] = old_cells[row_start];
+    next_cells[row_start + cols - 1] =
+        old_cells[row_start + cols - 1];
   }
 
-// Calculate only non-boundary cells.
-// v3 improvement: adding parallelism, disclosure; didnt know abt this before, googled
-// and found this. Very neat and quite neccessary if working with large grids.
+// The fast interior calculation works only with views/raw storage.
 #pragma omp parallel for
   for (std::size_t i = 1; i < rows - 1; ++i)
   {
@@ -200,18 +203,22 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid)
     {
       const std::size_t index{row_start + j};
 
-      // formula from onboarding page
-      next[index] = five_point_stencil(
-          old[index],          // centre
-          old[index - stride], // above
-          old[index + stride], // below
-          old[index - 1],      // left
-          old[index + 1]       // right
-      );
+      next_cells[index] = five_point_stencil(
+          old_cells[index],
+          old_cells[index - stride],
+          old_cells[index + stride],
+          old_cells[index - 1],
+          old_cells[index + 1]);
     }
   }
 }
 
+// Apply the five-point stencil over all interior points, copying the boundary
+// values unchanged from old_grid to new_grid. Implement your solution here.
+void apply_stencil(const Grid &old_grid, Grid &new_grid)
+{
+  apply_stencil_view(old_grid.view(), new_grid.view());
+}
 /*
 Without Parallel:
 cmake --build --preset benchmark
