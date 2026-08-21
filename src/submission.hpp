@@ -104,7 +104,7 @@ static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, s
 
 			_mm256_storeu_pd(&new_grid(i, j), cur);
 		}
-		for (int j = M - 2 - T; j < M - 1; j++) {
+		for (int j = M - 1 - T; j < M - 1; j++) {
 			new_grid(i, j) = 0.5 * old_grid(i, j) + 0.125 * (old_grid(i - 1, j) + old_grid(i, j - 1) +
 															 old_grid(i + 1, j) + old_grid(i, j + 1));
 		}
