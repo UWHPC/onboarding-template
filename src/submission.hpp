@@ -95,18 +95,22 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
 
-	size_t base = 1;
-	const size_t stride = (N - 2) / nthreads;
+	if (N >= 8) {
+		size_t base = 1;
+		const size_t stride = (N - 2) / nthreads;
 
-	std::thread workers[nthreads];
-	for (int i = 0; i < nthreads - 1; i++) {
-		workers[i] = std::thread(_apply_stencil, std::cref(old_grid), std::ref(new_grid), base, base + stride);
-		base += stride;
+		std::thread workers[nthreads];
+		for (int i = 0; i < nthreads - 1; i++) {
+			workers[i] = std::thread(_apply_stencil, std::cref(old_grid), std::ref(new_grid), base, base + stride);
+			base += stride;
+		}
+		workers[nthreads - 1] = std::thread(_apply_stencil, std::cref(old_grid), std::ref(new_grid), base, N - 1);
+
+		for (auto &x : workers)
+			x.join();
+	} else {
+		_apply_stencil(old_grid, new_grid, 1, N - 1);
 	}
-	workers[nthreads - 1] = std::thread(_apply_stencil, std::cref(old_grid), std::ref(new_grid), base, N - 1);
-
-	for (auto &x : workers)
-		x.join();
 
 	for (int j = 0; j < M; j++) {
 		new_grid(0, j) = old_grid(0, j);
