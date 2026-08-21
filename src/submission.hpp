@@ -1,9 +1,10 @@
 #pragma once
 
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <immintrin.h>
+#include <mutex>
 #include <new>
 #include <sys/mman.h>
 
@@ -90,24 +91,74 @@ static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, s
 	}
 }
 
+struct ThreadInfo {
+	const Grid *old_grid;
+	Grid *new_grid;
+	size_t start, end;
+};
+
+class Barrier {
+private:
+	std::mutex mu;
+	std::condition_variable cv;
+	int num;
+	int arrived;
+	size_t gen_;
+
+public:
+	explicit Barrier(int num) : num(num), arrived(0), gen_(0) {}
+
+	void arrive_and_wait() {
+		std::unique_lock<std::mutex> lock(mu);
+		std::size_t gen = gen_;
+		if (++arrived == num) {
+			arrived = 0;
+			gen_++;
+			cv.notify_all();
+		} else {
+			cv.wait(lock, [&] { return gen_ != gen; });
+		}
+	}
+};
+
+static constexpr int NTHREADS = 4;
+static ThreadInfo tis[NTHREADS];
+
+static inline Barrier &start_barrier() {
+	static Barrier *b = new Barrier(NTHREADS + 1);
+	return *b;
+}
+static inline Barrier &done_barrier() {
+	static Barrier *b = new Barrier(NTHREADS + 1);
+	return *b;
+}
+
+static void worker(int idx) {
+	while (true) {
+		const ThreadInfo &t = tis[idx];
+
+		start_barrier().arrive_and_wait();
+		_apply_stencil(*t.old_grid, *t.new_grid, t.start, t.end);
+		done_barrier().arrive_and_wait();
+	}
+}
+
 static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
-	constexpr int nthreads = 4;
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
 
 	if (N >= 8) {
 		size_t base = 1;
-		const size_t stride = (N - 2) / nthreads;
+		const size_t stride = (N - 2) / NTHREADS;
 
-		std::thread workers[nthreads];
-		for (int i = 0; i < nthreads - 1; i++) {
-			workers[i] = std::thread(_apply_stencil, std::cref(old_grid), std::ref(new_grid), base, base + stride);
+		for (int i = 0; i < NTHREADS - 1; i++) {
+			tis[i] = {&old_grid, &new_grid, base, base + stride};
 			base += stride;
 		}
-		workers[nthreads - 1] = std::thread(_apply_stencil, std::cref(old_grid), std::ref(new_grid), base, N - 1);
+		tis[NTHREADS - 1] = {&old_grid, &new_grid, base, N - 1};
 
-		for (auto &x : workers)
-			x.join();
+		start_barrier().arrive_and_wait();
+		done_barrier().arrive_and_wait();
 	} else {
 		_apply_stencil(old_grid, new_grid, 1, N - 1);
 	}
@@ -115,5 +166,11 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 	for (int j = 0; j < M; j++) {
 		new_grid(0, j) = old_grid(0, j);
 		new_grid(N - 1, j) = old_grid(N - 1, j);
+	}
+}
+
+__attribute__((constructor)) static void init_workers() {
+	for (int i = 0; i < NTHREADS; i++) {
+		std::thread(worker, i).detach();
 	}
 }
