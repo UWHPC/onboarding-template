@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <thread>
+#include <xmmintrin.h>
 
 #pragma GCC optimize("fast-math")
 
@@ -23,7 +24,7 @@ private:
 	size_t rows_;
 	size_t cols_;
 	size_t size_;
-	double *data;
+	double *data_;
 
 public:
 	Grid(size_t rows, size_t cols) : rows_(rows), cols_(cols) {
@@ -46,23 +47,26 @@ public:
 			munmap((void *)(aligned + size_), back_slack);
 
 		raw = (void *)aligned;
-		data = (double *)aligned;
-		madvise(data, size_, MADV_SEQUENTIAL | MADV_UNMERGEABLE | MADV_HUGEPAGE | MADV_COLLAPSE);
-		memset(data, 0, size_);
+		data_ = (double *)aligned;
+		madvise(data_, size_, MADV_SEQUENTIAL | MADV_UNMERGEABLE | MADV_HUGEPAGE | MADV_COLLAPSE);
+		memset(data_, 0, size_);
 	}
 
 	~Grid() {
-		munmap(data, size_);
+		munmap(data_, size_);
 	}
 
 	Grid(const Grid &) = delete;
 	Grid &operator=(const Grid &) = delete;
 
 	double &operator()(size_t i, size_t j) {
-		return data[i * cols_ + j];
+		return data_[i * cols_ + j];
 	}
 	double operator()(size_t i, size_t j) const {
-		return data[i * cols_ + j];
+		return data_[i * cols_ + j];
+	}
+	const double &get(size_t i, size_t j) const {
+		return data_[i * cols_ + j];
 	}
 
 	size_t rows() const {
@@ -78,17 +82,39 @@ public:
 static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, size_t end) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
+	const size_t stride = 256 / 8 / sizeof(double);
+	const size_t T = (M - 2) % stride;
+
+	const __m256d two = _mm256_set1_pd(0.5);
+	const __m256d eight = _mm256_set1_pd(0.125);
 
 	for (int i = start; i < end; i++) {
-		for (int j = 0; j < M; j++) {
-			if (j == 0 || j == M - 1) {
-				new_grid(i, j) = old_grid(i, j);
-				continue;
-			}
+		for (int j = 1; j < M - 2 - T; j += stride) {
+			__m256d up = _mm256_loadu_pd(&old_grid.get(i - 1, j));
+			__m256d down = _mm256_loadu_pd(&old_grid.get(i + 1, j));
+			__m256d left = _mm256_loadu_pd(&old_grid.get(i, j - 1));
+			__m256d right = _mm256_loadu_pd(&old_grid.get(i, j + 1));
+			__m256d cur = _mm256_loadu_pd(&old_grid.get(i, j));
+
+			__m256d ver = _mm256_add_pd(up, down);
+			__m256d hor = _mm256_add_pd(left, right);
+
+			__m256d around = _mm256_mul_pd(_mm256_add_pd(ver, hor), eight);
+			cur = _mm256_fmadd_pd(two, cur, around);
+
+			_mm256_storeu_pd(&new_grid(i, j), cur);
+		}
+		for (int j = M - 2 - T; j < M - 1; j++) {
 			new_grid(i, j) = 0.5 * old_grid(i, j) + 0.125 * (old_grid(i - 1, j) + old_grid(i, j - 1) +
 															 old_grid(i + 1, j) + old_grid(i, j + 1));
 		}
+
+		if (i != end - 1) {
+			_mm_storeu_pd(&new_grid(i, M - 1), _mm_loadu_pd(&old_grid.get(i, M - 1)));
+		}
 	}
+	new_grid(start, 0) = old_grid(start, 0);
+	new_grid(end - 1, M - 1) = old_grid(end - 1, M - 1);
 }
 
 struct ThreadInfo {
