@@ -79,21 +79,20 @@ public:
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
-static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, size_t end) {
+template <bool aligned> static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, size_t end) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
 
 	const double *__restrict__ old_data = &old_grid.get(0, 0);
 	double *__restrict__ new_data = &new_grid(0, 0);
 
-	if (M <= 2) {
+	if (!aligned && M <= 2) {
 		if (start < end)
 			memcpy(new_data + start * M, old_data + start * M, (end - start) * M * sizeof(double));
 		return;
 	}
 
 	const size_t stride = 256 / 8 / sizeof(double);
-	const size_t T = (M - 2) % stride;
 
 	const __m256d two = _mm256_set1_pd(0.5);
 	const __m256d eight = _mm256_set1_pd(0.125);
@@ -101,39 +100,64 @@ static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, s
 	for (int i = start; i < end; i++) {
 		const double *row = old_data + (size_t)i * M;
 		double *nrow = new_data + (size_t)i * M;
-		for (int j = 1; j < M - 2 - T; j += stride) {
-			__m256d up = _mm256_loadu_pd(row + j - M);
-			__m256d down = _mm256_loadu_pd(row + j + M);
-			__m256d left = _mm256_loadu_pd(row + j - 1);
-			__m256d right = _mm256_loadu_pd(row + j + 1);
-			__m256d cur = _mm256_loadu_pd(row + j);
 
-			__m256d ver = _mm256_add_pd(up, down);
-			__m256d hor = _mm256_add_pd(left, right);
+		if (aligned) {
+			for (int j = 0; j < M; j += stride) {
+				__m256d up = _mm256_load_pd(row + j - M);
+				__m256d down = _mm256_load_pd(row + j + M);
+				__m256d left = _mm256_loadu_pd(row + j - 1);
+				__m256d right = _mm256_loadu_pd(row + j + 1);
+				__m256d cur = _mm256_load_pd(row + j);
 
-			__m256d around = _mm256_mul_pd(_mm256_add_pd(ver, hor), eight);
-			cur = _mm256_fmadd_pd(two, cur, around);
+				__m256d ver = _mm256_add_pd(up, down);
+				__m256d hor = _mm256_add_pd(left, right);
 
-			_mm256_storeu_pd(nrow + j, cur);
+				__m256d around = _mm256_mul_pd(_mm256_add_pd(ver, hor), eight);
+				cur = _mm256_fmadd_pd(two, cur, around);
+
+				_mm256_store_pd(nrow + j, cur);
+			}
+		} else {
+			const size_t T = (M - 1) % stride;
+			for (int j = 1; j < M - T; j += stride) {
+				__m256d up = _mm256_loadu_pd(row + j - M);
+				__m256d down = _mm256_loadu_pd(row + j + M);
+				__m256d left = _mm256_loadu_pd(row + j - 1);
+				__m256d right = _mm256_loadu_pd(row + j + 1);
+				__m256d cur = _mm256_loadu_pd(row + j);
+
+				__m256d ver = _mm256_add_pd(up, down);
+				__m256d hor = _mm256_add_pd(left, right);
+
+				__m256d around = _mm256_mul_pd(_mm256_add_pd(ver, hor), eight);
+				cur = _mm256_fmadd_pd(two, cur, around);
+
+				_mm256_storeu_pd(nrow + j, cur);
+			}
+			for (int j = M - T; j < M; j++)
+				nrow[j] = 0.5 * row[j] + 0.125 * (row[j - M] + row[j - 1] + row[j + M] + row[j + 1]);
 		}
-		for (int j = M - 1 - T; j < M - 1; j++) {
-			nrow[j] = 0.5 * row[j] + 0.125 * (row[j - M] + row[j - 1] + row[j + M] + row[j + 1]);
-		}
 
-		if (i != end - 1) {
-			_mm_storeu_pd(nrow + M - 1, _mm_loadu_pd(row + M - 1));
-		}
+		nrow[M - 1] = row[M - 1];
+		nrow[0] = row[0];
 	}
+
 	if (start < end) {
 		new_data[start * M] = old_data[start * M];
 		new_data[(end - 1) * M + M - 1] = old_data[(end - 1) * M + M - 1];
 	}
 }
 
-struct ThreadInfo {
-	const Grid *old_grid;
-	Grid *new_grid;
-	size_t start, end;
+struct alignas(64) ThreadInfo {
+	union {
+		struct {
+			const Grid *old_grid;
+			Grid *new_grid;
+			size_t start, end;
+			bool aligned;
+		};
+		uint8_t pad[64];
+	};
 };
 
 class Barrier {
@@ -173,11 +197,16 @@ static inline Barrier &done_barrier() {
 }
 
 static void worker(int idx) {
-	while (true) {
-		const ThreadInfo &t = tis[idx];
+	const ThreadInfo &t = tis[idx];
 
+	while (true) {
 		start_barrier().arrive_and_wait();
-		_apply_stencil(*t.old_grid, *t.new_grid, t.start, t.end);
+
+		if (__builtin_expect(t.aligned, true))
+			_apply_stencil<true>(*t.old_grid, *t.new_grid, t.start, t.end);
+		else
+			_apply_stencil<false>(*t.old_grid, *t.new_grid, t.start, t.end);
+
 		done_barrier().arrive_and_wait();
 	}
 }
@@ -185,13 +214,14 @@ static void worker(int idx) {
 static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
+	const bool aligned = (M % 4) == 0;
 
 	if (N >= 8) {
 		size_t base = 1;
 		const size_t stride = (N - 2) / NTHREADS;
 
 		for (int i = 0; i < NTHREADS - 1; i++) {
-			tis[i] = {&old_grid, &new_grid, base, base + stride};
+			tis[i] = {&old_grid, &new_grid, base, base + stride, aligned};
 			base += stride;
 		}
 		tis[NTHREADS - 1] = {&old_grid, &new_grid, base, N - 1};
@@ -199,7 +229,7 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 		start_barrier().arrive_and_wait();
 		done_barrier().arrive_and_wait();
 	} else {
-		_apply_stencil(old_grid, new_grid, 1, N - 1);
+		_apply_stencil<false>(old_grid, new_grid, 1, N - 1);
 	}
 
 	for (int j = 0; j < M; j++) {
