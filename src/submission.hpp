@@ -12,8 +12,6 @@
 #include <thread>
 #include <xmmintrin.h>
 
-#pragma GCC optimize("fast-math")
-
 // Starter Grid for the 2D heat-diffusion problem.
 //
 // The evaluation harness uses operator() to set initial conditions and to read
@@ -148,7 +146,7 @@ template <bool aligned> static void _apply_stencil(const Grid &old_grid, Grid &n
 	}
 }
 
-struct alignas(64) ThreadInfo {
+struct ThreadInfo {
 	union {
 		struct {
 			const Grid *old_grid;
@@ -185,7 +183,7 @@ public:
 };
 
 static constexpr int NTHREADS = 4;
-static ThreadInfo tis[NTHREADS];
+alignas(64) static ThreadInfo tis[NTHREADS];
 
 static inline Barrier &start_barrier() {
 	static Barrier *b = new Barrier(NTHREADS + 1);
@@ -232,10 +230,8 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 		_apply_stencil<false>(old_grid, new_grid, 1, N - 1);
 	}
 
-	for (int j = 0; j < M; j++) {
-		new_grid(0, j) = old_grid(0, j);
-		new_grid(N - 1, j) = old_grid(N - 1, j);
-	}
+	std::memcpy(&new_grid(0, 0), &old_grid.get(0, 0), M * sizeof(double));
+	std::memcpy(&new_grid(N - 1, 0), &old_grid.get(N - 1, 0), M * sizeof(double));
 }
 
 __attribute__((constructor)) static void init_workers() {
