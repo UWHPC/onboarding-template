@@ -51,23 +51,13 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
     const std::size_t rows{dimensions.rows};
     const std::size_t cols{dimensions.cols};
 
-    if (rows < 2 || cols < 2) {
-        return;
-    }
-
     for (std::size_t j = 0; j < cols; j++) {
         new_grid(0, j) = old_grid(0, j);
-    }
-
-    for (std::size_t j = 0; j < cols; j++) {
         new_grid(rows - 1, j) = old_grid(rows - 1, j);
     }
 
     for (std::size_t i = 0; i < rows; i++) {
         new_grid(i, 0) = old_grid(i, 0);
-    }
-
-    for (std::size_t i = 0; i < rows; i++) {
         new_grid(i, cols - 1) = old_grid(i, cols - 1);
     }
 
