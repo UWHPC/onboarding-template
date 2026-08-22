@@ -74,8 +74,6 @@ public:
 	}
 };
 
-// Apply the five-point stencil over all interior points, copying the boundary
-// values unchanged from old_grid to new_grid. Implement your solution here.
 template <bool aligned> static void _apply_stencil(const Grid &old_grid, Grid &new_grid, size_t start, size_t end) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
@@ -83,10 +81,12 @@ template <bool aligned> static void _apply_stencil(const Grid &old_grid, Grid &n
 	const double *__restrict__ old_data = &old_grid.get(0, 0);
 	double *__restrict__ new_data = &new_grid(0, 0);
 
-	if (!aligned && M <= 2) {
-		if (start < end)
-			memcpy(new_data + start * M, old_data + start * M, (end - start) * M * sizeof(double));
-		return;
+	if constexpr (!aligned) {
+		if (M <= 2) {
+			if (start < end)
+				memcpy(new_data + start * M, old_data + start * M, (end - start) * M * sizeof(double));
+			return;
+		}
 	}
 
 	const size_t stride = 256 / 8 / sizeof(double);
@@ -98,7 +98,7 @@ template <bool aligned> static void _apply_stencil(const Grid &old_grid, Grid &n
 		const double *row = old_data + (size_t)i * M;
 		double *nrow = new_data + (size_t)i * M;
 
-		if (aligned) {
+		if constexpr (aligned) {
 			for (int j = 0; j < M; j += stride) {
 				__m256d up = _mm256_load_pd(row + j - M);
 				__m256d down = _mm256_load_pd(row + j + M);
@@ -180,6 +180,8 @@ static void worker(int idx) {
 	}
 }
 
+// Apply the five-point stencil over all interior points, copying the boundary
+// values unchanged from old_grid to new_grid. Implement your solution here.
 static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 	const size_t N = old_grid.rows();
 	const size_t M = old_grid.cols();
@@ -202,14 +204,17 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 		else
 			_apply_stencil<false>(old_grid, new_grid, base, N - 1);
 
+		std::memcpy(&new_grid(0, 0), &old_grid.get(0, 0), M * sizeof(double));
+		std::memcpy(&new_grid(N - 1, 0), &old_grid.get(N - 1, 0), M * sizeof(double));
+
 		while (done.load(std::memory_order_acquire) < NTHREADS - 1)
 			_mm_pause();
 	} else {
 		_apply_stencil<false>(old_grid, new_grid, 1, N - 1);
-	}
 
-	std::memcpy(&new_grid(0, 0), &old_grid.get(0, 0), M * sizeof(double));
-	std::memcpy(&new_grid(N - 1, 0), &old_grid.get(N - 1, 0), M * sizeof(double));
+		std::memcpy(&new_grid(0, 0), &old_grid.get(0, 0), M * sizeof(double));
+		std::memcpy(&new_grid(N - 1, 0), &old_grid.get(N - 1, 0), M * sizeof(double));
+	}
 }
 
 __attribute__((constructor)) static void init_workers() {
