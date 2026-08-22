@@ -182,7 +182,7 @@ public:
 	}
 };
 
-static constexpr int NTHREADS = 4;
+static constexpr int NTHREADS = 3;
 alignas(64) static ThreadInfo tis[NTHREADS];
 
 static inline Barrier &start_barrier() {
