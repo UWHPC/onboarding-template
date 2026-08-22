@@ -1,10 +1,9 @@
 #pragma once
 
-#include <condition_variable>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <immintrin.h>
-#include <mutex>
 #include <new>
 #include <sys/mman.h>
 
@@ -158,54 +157,26 @@ struct ThreadInfo {
 	};
 };
 
-class Barrier {
-private:
-	std::mutex mu;
-	std::condition_variable cv;
-	int num;
-	int arrived;
-	size_t gen_;
-
-public:
-	explicit Barrier(int num) : num(num), arrived(0), gen_(0) {}
-
-	void arrive_and_wait() {
-		std::unique_lock<std::mutex> lock(mu);
-		std::size_t gen = gen_;
-		if (++arrived == num) {
-			arrived = 0;
-			gen_++;
-			cv.notify_all();
-		} else {
-			cv.wait(lock, [&] { return gen_ != gen; });
-		}
-	}
-};
-
 static constexpr int NTHREADS = 4;
-alignas(64) static ThreadInfo tis[NTHREADS];
-
-static inline Barrier &start_barrier() {
-	static Barrier *b = new Barrier(NTHREADS + 1);
-	return *b;
-}
-static inline Barrier &done_barrier() {
-	static Barrier *b = new Barrier(NTHREADS + 1);
-	return *b;
-}
+alignas(64) static ThreadInfo tis[NTHREADS - 1];
+alignas(64) static std::atomic_int done = 0;
+alignas(64) static std::atomic_int epoch = 0;
 
 static void worker(int idx) {
 	const ThreadInfo &t = tis[idx];
+	int cur_epoch = 0;
 
 	while (true) {
-		start_barrier().arrive_and_wait();
+		cur_epoch++;
+		while (epoch.load(std::memory_order_acquire) < cur_epoch)
+			_mm_pause();
 
 		if (__builtin_expect(t.aligned, true))
 			_apply_stencil<true>(*t.old_grid, *t.new_grid, t.start, t.end);
 		else
 			_apply_stencil<false>(*t.old_grid, *t.new_grid, t.start, t.end);
 
-		done_barrier().arrive_and_wait();
+		done.fetch_add(1, std::memory_order_release);
 	}
 }
 
@@ -222,10 +193,17 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 			tis[i] = {&old_grid, &new_grid, base, base + stride, aligned};
 			base += stride;
 		}
-		tis[NTHREADS - 1] = {&old_grid, &new_grid, base, N - 1};
 
-		start_barrier().arrive_and_wait();
-		done_barrier().arrive_and_wait();
+		done.store(0, std::memory_order_relaxed);
+		epoch.fetch_add(1, std::memory_order_release);
+
+		if (__builtin_expect(aligned, true))
+			_apply_stencil<true>(old_grid, new_grid, base, N - 1);
+		else
+			_apply_stencil<false>(old_grid, new_grid, base, N - 1);
+
+		while (done.load(std::memory_order_acquire) < NTHREADS - 1)
+			_mm_pause();
 	} else {
 		_apply_stencil<false>(old_grid, new_grid, 1, N - 1);
 	}
@@ -235,7 +213,7 @@ static void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 }
 
 __attribute__((constructor)) static void init_workers() {
-	for (int i = 0; i < NTHREADS; i++) {
+	for (int i = 0; i < NTHREADS - 1; i++) {
 		std::thread(worker, i).detach();
 	}
 }
