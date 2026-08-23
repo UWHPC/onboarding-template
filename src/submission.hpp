@@ -2,13 +2,6 @@
 
 #include <cstddef>
 #include <vector>
-#include <omp.h>
-
-// Starter Grid for the 2D heat-diffusion problem.
-//
-// The evaluation harness uses operator() to set initial conditions and to read
-// results; it never touches your internal storage. Keep this interface,
-// everything else is yours.
 
 struct Dimensions {
     std::size_t rows;
@@ -43,8 +36,6 @@ inline double five_point_stencil(const Grid &old_grid, std::size_t i, std::size_
                                            old_grid(i, j - 1) + old_grid(i, j + 1));
 }
 
-// Apply the five-point stencil over all interior points, copying the boundary
-// values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid &old_grid, Grid &new_grid) {
     Dimensions dimensions{old_grid.get_dimensions()};
 
@@ -58,8 +49,9 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
         new_grid(i, dimensions.cols - 1) = old_grid(i, dimensions.cols - 1);
     }
 
-#pragma omp parallel for simd
+#pragma omp parallel for
     for (std::size_t i = 1; i < dimensions.rows - 1; i++) {
+#pragma omp simd
         for (std::size_t j = 1; j < dimensions.cols - 1; j++) {
             new_grid(i, j) = five_point_stencil(old_grid, i, j);
         }
