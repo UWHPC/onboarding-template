@@ -48,22 +48,19 @@ inline double five_point_stencil(const Grid &old_grid, std::size_t i, std::size_
 void apply_stencil(const Grid &old_grid, Grid &new_grid) {
     Dimensions dimensions{old_grid.get_dimensions()};
 
-    const std::size_t rows{dimensions.rows};
-    const std::size_t cols{dimensions.cols};
-
-    for (std::size_t j = 0; j < cols; j++) {
+    for (std::size_t j = 0; j < dimensions.cols; j++) {
         new_grid(0, j) = old_grid(0, j);
-        new_grid(rows - 1, j) = old_grid(rows - 1, j);
+        new_grid(dimensions.rows - 1, j) = old_grid(dimensions.rows - 1, j);
     }
 
-    for (std::size_t i = 0; i < rows; i++) {
+    for (std::size_t i = 0; i < dimensions.rows; i++) {
         new_grid(i, 0) = old_grid(i, 0);
-        new_grid(i, cols - 1) = old_grid(i, cols - 1);
+        new_grid(i, dimensions.cols - 1) = old_grid(i, dimensions.cols - 1);
     }
 
-#pragma omp parallel for
-    for (std::size_t i = 1; i < rows - 1; i++) {
-        for (std::size_t j = 1; j < cols - 1; j++) {
+#pragma omp parallel for simd
+    for (std::size_t i = 1; i < dimensions.rows - 1; i++) {
+        for (std::size_t j = 1; j < dimensions.cols - 1; j++) {
             new_grid(i, j) = five_point_stencil(old_grid, i, j);
         }
     }
