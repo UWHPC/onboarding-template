@@ -43,24 +43,23 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)  {
   const double* old_data{old_grid.data()};
   double* new_data{new_grid.data()};
 
-  for (std::size_t i = 0; i < old_rows; i++) {
+  for (std::size_t i = 0; i < old_rows; ++i) {
     new_data[i*old_cols] = old_data[i*old_cols];
     new_data[i*old_cols + old_cols - 1] = old_data[i*old_cols + old_cols - 1];
   }
 
-  for (std::size_t j = 0; j < old_cols; j++) {
+  for (std::size_t j = 0; j < old_cols; ++j) {
     new_data[j] = old_data[j];
     new_data[(old_rows-1)*old_cols + j] = old_data[(old_rows-1)*old_cols + j];
   }
 
   #pragma omp parallel for
-  for (std::size_t i = 1; i < old_rows-1; i++) {
-    const std::size_t row_offset{i * old_cols};
-    const double* old_row{old_data + row_offset};
-    double* new_row{new_data + row_offset};
+  for (std::size_t i = 1; i < old_rows-1; ++i) {
+    const double* old_row{old_data + i*old_cols};
+    double* new_row{new_data + i*old_cols};
 
     #pragma omp simd
-    for (std::size_t j = 1; j < old_cols-1; j++) {
+    for (std::size_t j = 1; j < old_cols-1; ++j) {
       new_row[j] = 0.5 * old_row[j] + 0.125 * (old_row[j-old_cols] + old_row[j+old_cols] + old_row[j-1] + old_row[j+1]);
     }
   }
