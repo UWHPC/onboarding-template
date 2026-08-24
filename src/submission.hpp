@@ -33,9 +33,9 @@ public:
     }
 };
 
-inline double five_point_stencil(const double* __restrict__ src, std::size_t i, std::size_t j, std::size_t cols) {
-    return 0.5 * src[(i * cols) + j] + 0.125 * (src[((i * cols) + j) - cols] + src[((i * cols) + j) + cols] +
-                                           src[((i * cols) + j) - 1] + src[((i * cols) + j) + 1]);
+inline double five_point_stencil(const double* __restrict__ src, std::size_t offset, std::size_t cols) {
+    return 0.5 * src[offset] + 0.125 * (src[offset - cols] + src[offset + cols] +
+                                           src[offset - 1] + src[offset + 1]);
 }
 
 void apply_stencil(const Grid &old_grid, Grid &new_grid) {
@@ -56,9 +56,11 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 
 #pragma omp parallel for
     for (std::size_t i = 1; i < dimensions.rows - 1; i++) {
+        const std::size_t location = i * dimensions.cols;
+
 #pragma omp simd
         for (std::size_t j = 1; j < dimensions.cols - 1; j++) {
-            dest[i * dimensions.cols + j] = five_point_stencil(src, i, j, dimensions.cols);
+            dest[i * dimensions.cols + j] = five_point_stencil(src, location + j, dimensions.cols);
         }
     }
 }
