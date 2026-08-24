@@ -15,18 +15,10 @@ private:
   std::vector<double> grid;
 
 public:
-  Grid(std::size_t rows, std::size_t cols) {
-    rows_ = rows;
-    cols_ = cols;
-    grid.resize(rows*cols);
-  }
+  Grid(std::size_t rows, std::size_t cols): rows_{rows}, cols_{cols}, grid(rows * cols) {}
 
-  std::size_t getRows() const {
-    return rows_;
-  }
-
-  std::size_t getCols() const {
-    return cols_;
+  std::pair<std::size_t, std::size_t> getDimensions() const {
+    return {rows_, cols_};
   }
 
   double& operator()(std::size_t i, std::size_t j) {
@@ -35,28 +27,41 @@ public:
   double  operator()(std::size_t i, std::size_t j) const {
     return grid[i*cols_ + j];
   };
+
+  double* data() { return grid.data(); }
+  const double* data() const { return grid.data(); }
 };  
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid& old_grid, Grid& new_grid)  {
-  std::size_t old_rows = old_grid.getRows();
-  std::size_t old_cols = old_grid.getCols();
+  const auto [old_rows, old_cols] = old_grid.getDimensions();
+  if (old_rows == 0 || old_cols == 0) {
+    return;
+  }
+
+  const double* old_data{old_grid.data()};
+  double* new_data{new_grid.data()};
 
   for (std::size_t i = 0; i < old_rows; i++) {
-    new_grid(i, 0) = old_grid(i, 0);
-    new_grid(i, old_cols-1) = old_grid(i, old_cols-1);
+    new_data[i*old_cols] = old_data[i*old_cols];
+    new_data[i*old_cols + old_cols - 1] = old_data[i*old_cols + old_cols - 1];
   }
 
   for (std::size_t j = 0; j < old_cols; j++) {
-    new_grid(0, j) = old_grid(0, j);
-    new_grid(old_rows-1, j) = old_grid(old_rows-1, j);
+    new_data[j] = old_data[j];
+    new_data[(old_rows-1)*old_cols + j] = old_data[(old_rows-1)*old_cols + j];
   }
 
   #pragma omp parallel for
   for (std::size_t i = 1; i < old_rows-1; i++) {
+    const std::size_t row_offset{i * old_cols};
+    const double* old_row{old_data + row_offset};
+    double* new_row{new_data + row_offset};
+
+    #pragma omp simd
     for (std::size_t j = 1; j < old_cols-1; j++) {
-      new_grid(i, j) = 0.5 * old_grid(i, j) + 0.125 * (old_grid(i-1, j) + old_grid(i+1, j) + old_grid(i, j-1) + old_grid(i, j+1));
+      new_row[j] = 0.5 * old_row[j] + 0.125 * (old_row[j-old_cols] + old_row[j+old_cols] + old_row[j-1] + old_row[j+1]);
     }
   }
 }
