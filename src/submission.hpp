@@ -17,6 +17,8 @@ private:
 public:
     Grid(std::size_t rows, std::size_t cols) : rows_(rows), cols_(cols), data_(rows * cols, 0.0) {
     }
+    const double* data() const {return data_.data();}
+    double* data() {return data_.data();}
 
     double &operator()(std::size_t i, std::size_t j) {
         return data_[(i * cols_) + j];
@@ -31,29 +33,32 @@ public:
     }
 };
 
-inline double five_point_stencil(const Grid &old_grid, std::size_t i, std::size_t j) {
-    return 0.5 * old_grid(i, j) + 0.125 * (old_grid(i - 1, j) + old_grid(i + 1, j) +
-                                           old_grid(i, j - 1) + old_grid(i, j + 1));
+inline double five_point_stencil(const double* __restrict__ src, std::size_t i, std::size_t j, std::size_t cols) {
+    return 0.5 * src[(i * cols) + j] + 0.125 * (src[((i * cols) + j) - cols] + src[((i * cols) + j) + cols] +
+                                           src[((i * cols) + j) - 1] + src[((i * cols) + j) + 1]);
 }
 
 void apply_stencil(const Grid &old_grid, Grid &new_grid) {
     Dimensions dimensions{old_grid.get_dimensions()};
 
+    const double* __restrict__ src = old_grid.data();
+    double* __restrict__ dest = new_grid.data();
+
     for (std::size_t j = 0; j < dimensions.cols; j++) {
-        new_grid(0, j) = old_grid(0, j);
-        new_grid(dimensions.rows - 1, j) = old_grid(dimensions.rows - 1, j);
+        dest[0 * dimensions.cols + j] = src[0 * dimensions.cols + j];
+        dest[(dimensions.rows - 1) * dimensions.cols + j] = src[(dimensions.rows - 1) * dimensions.cols + j];
     }
 
     for (std::size_t i = 0; i < dimensions.rows; i++) {
-        new_grid(i, 0) = old_grid(i, 0);
-        new_grid(i, dimensions.cols - 1) = old_grid(i, dimensions.cols - 1);
+        dest[i * dimensions.cols + 0] = src[i * dimensions.cols + 0];
+        dest[i * dimensions.cols + (dimensions.cols - 1)] = src[i * dimensions.cols + (dimensions.cols - 1)];
     }
 
 #pragma omp parallel for
     for (std::size_t i = 1; i < dimensions.rows - 1; i++) {
 #pragma omp simd
         for (std::size_t j = 1; j < dimensions.cols - 1; j++) {
-            new_grid(i, j) = five_point_stencil(old_grid, i, j);
+            dest[i * dimensions.cols + j] = five_point_stencil(src, i, j, dimensions.cols);
         }
     }
 }
