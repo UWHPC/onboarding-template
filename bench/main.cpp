@@ -112,6 +112,7 @@ const CorrectnessCase kPublicCases[]{
   {48, 80, 40, InitialCondition::kLinearGradient, "public/nonsquare-48x80"},
   {64, 64, 30, InitialCondition::kCheckerboard,   "public/checker-64"},
   {50, 50, 1,  InitialCondition::kCenterBlock,    "public/one-step-50"},
+  {80, 50, 10, InitialCondition::kLinearGradient, "public/nonsquare-boundary-80x50"},
 };
 
 double max_difference_from_reference(
