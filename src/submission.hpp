@@ -11,7 +11,7 @@ class Grid {
 private:
   std::size_t rows_;
   std::size_t cols_;
-  double** data_;
+  double* data_;
 
 public:
   Grid(std::size_t rows, std::size_t cols);
@@ -31,19 +31,16 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid);
 Grid::Grid(std::size_t rows, std::size_t cols)
   : rows_{rows}
   , cols_{cols}
-  , data_{new double*[rows]}
+  , data_{new double[rows * cols]}
 {
-  for (std::size_t i{}; i < rows; ++i) {
-    data_[i] = new double[cols]{};
-  }
 }
 
 double& Grid::operator()(std::size_t i, std::size_t j) {
-  return data_[i][j];
+  return data_[i * cols_ + j];
 }
 
 double Grid::operator()(std::size_t i, std::size_t j) const {
-  return data_[i][j];
+  return data_[i * cols_ + j];
 }
 
 void apply_stencil(const Grid& old_grid, Grid& new_grid) {
