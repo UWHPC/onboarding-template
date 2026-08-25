@@ -75,8 +75,15 @@ public:
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
     const std::size_t m{old_grid.rows()}, n{old_grid.cols()};
 
-    //invalid dimension
-    if (m == 0 || n == 0) return;
+    // if there are 2 or fewer rows or cols (but both greater than 0)
+    // then all points are boundary points. This also ensures that 
+    // later n - 2 and m - 1 will never underflow
+    if (m <= 2 || n <= 2) {
+        if (m > 0 && n > 0) {
+            std::memcpy(new_grid.data(), old_grid.data(), m * old_grid.stride() * sizeof(double));
+        }
+        return;
+    }
 
     // __restrict promises that the read and write data do not overlap. Without it
     // the compiler assumes a store to new_grid might clobber a neighbour it is about
