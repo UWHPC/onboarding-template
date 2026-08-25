@@ -83,6 +83,15 @@ jobs:
           unit() { if [ "$1" = "n/a" ]; then printf 'n/a'; else printf '%s %s' "$1" "$2"; fi; }
           rt_s=$(unit "$rt" "ms"); mem_s=$(unit "$mem" "MB")
 
+          # Score is measured against a reference baseline (score = reference_ms /
+          # your_ms, so 1.0 ties the baseline). A submission must score OVER 0.9 to
+          # pass; below that, the check fails and we surface the reason on the PR.
+          THRESHOLD=0.9
+          score_ok=1
+          if [ "$status" = "completed" ] && [ "$score" != "n/a" ]; then
+            awk "BEGIN{exit !($score < $THRESHOLD)}" && score_ok=0 || true
+          fi
+
           # Status line; on a failure, add the grader's one-line hint as a
           # blockquote right below it (a coarse category, never the exact hidden
           # case or how to fix it). The blank lines that separate it from the
@@ -92,9 +101,11 @@ jobs:
           status_block="**Status:** ${status}"
           if [ -n "$msg" ] && [ "$status" != "completed" ]; then
             status_block=$(printf '**Status:** %s\n\n> %s' "$status" "$msg")
+          elif [ "$score_ok" = "0" ]; then
+            status_block=$(printf '**Status:** %s (below threshold)\n\n> Score %s is below the required 0.9 — your submission must be within 90%% of the reference baseline to pass. Keep optimizing and push again.' "$status" "$score")
           fi
 
-          report=$(printf '## UWHPC Evaluation\n\n%s\n\n| Stage | Result |\n| --- | --- |\n| Build | %s |\n| Public tests | %s |\n| Hidden tests | %s |\n| Runtime | %s |\n| Memory | %s |\n| Score | %s |\n\n<sub>Job `%s` · updated %s</sub>\n' \
+          report=$(printf '## UWHPC Evaluation\n\n%s\n\n| Stage | Result |\n| --- | --- |\n| Build | %s |\n| Public tests | %s |\n| Hidden tests | %s |\n| Runtime | %s |\n| Memory | %s |\n| Score | %s |\n\n> **Score** is measured against a reference baseline (`score = reference_ms / your_ms`), so **1.0** ties the baseline and higher is faster. You need a score **over 0.9** to pass — anything below marks this check as failing.\n\n<sub>Job `%s` · updated %s</sub>\n' \
             "$status_block" "$build" "$vis" "$hid" "$rt_s" "$mem_s" "$score" "$job_id" "$now")
           details=$(printf '\n<details><summary>Raw result</summary>\n\n```json\n%s\n```\n</details>\n' "$pretty")
 
@@ -133,4 +144,5 @@ jobs:
 
           # 6. Reflect pass/fail as the check status (PR stays open for iteration)
           [ "$status" = "completed" ] || { echo "::error::status=${status}"; exit 1; }
+          [ "$score_ok" = "1" ] || { echo "::error::score ${score} is below the required 0.9 threshold"; exit 1; }
           echo "Evaluation passed."

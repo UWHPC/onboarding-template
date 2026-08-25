@@ -38,6 +38,11 @@ time divided by yours:
 { "runtime_ms": 148.404, "memory_mb": 16.777, "score": 1.293 }
 ```
 
+Your `score` is measured against a reference **baseline**: a score of `1.0` ties
+the baseline, above `1.0` beats it, and below means you're slower. **You need a
+score over `0.9` to pass** — the evaluator marks any submission below that as a
+failing check.
+
 Use the commands above rather than an IDE's own CMake integration. Those default
 to a Debug build, which will cost you most of your score. See the
 [problem statement](https://docs.uwhpc.com/onboarding/problem-statement/) for what the number means.
@@ -47,9 +52,7 @@ to a Debug build, which will cost you most of your score. See the
 Submissions are a **pull request from your own fork** — no credentials or
 workflow changes needed.
 
-**Full step-by-step instructions: [How to submit](https://docs.uwhpc.com/onboarding/submit-and-discuss/).**
-
-In short: **fork** this repository, implement your solution in
+**Fork** this repository, implement your solution in
 `src/submission.hpp`, and open a **pull request** against
 `UWHPC/onboarding-template`. The evaluator runs automatically and posts a result
 comment on your PR with your build, test, and benchmark results. Keep pushing
