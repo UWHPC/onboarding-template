@@ -103,12 +103,24 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
         double* __restrict out{dst + i * stride};
 
         out[0] = ctr[0];
-        #pragma omp simd
-        for (std::size_t j = 1; j < n - 1; ++j) {
-            out[j] = 0.5 * ctr[j] +
-                     0.125 * (up[j] + down[j] +
-                              ctr[j - 1] + ctr[j + 1]);
+
+        // still a bit confusing, but this this exists so that 
+        // the compiler doesnt panic 
+        const double* __restrict up_a   = up + 1;
+        const double* __restrict ctr_a  = ctr + 1;
+        const double* __restrict down_a = down + 1;
+        double*       __restrict out_a  = out + 1;
+
+        // Promise the compiler that THESE new pointers are on the 64-byte boundary
+        // Note the new bounds: j goes from 0 to (n - 2)
+        // Because out_a[0] is physically out[1], the math perfectly matches!
+        #pragma omp simd aligned(up_a, ctr_a, down_a, out_a : 64)
+        for (std::size_t j = 0; j < n - 2; ++j) {
+            out_a[j] = 0.5 * ctr_a[j] +
+                       0.125 * (up_a[j] + down_a[j] +
+                                ctr_a[j - 1] + ctr_a[j + 1]);
         }
+
         out[n - 1] = ctr[n - 1];
     }
 }
