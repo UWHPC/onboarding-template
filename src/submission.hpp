@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <new>
+#include <cstring>
 
 // Starter Grid for the 2D heat-diffusion problem.
 //
@@ -42,8 +43,13 @@ public:
     // to be cache-line aligned. Shifting the base_ by doublesPerLine - 1 pushes
     // the 2nd element of each row to be at the start of each cache line
     base_ = owned_.get() + (doublesPerLine - 1);
-
-    for (std::size_t k = 0; k < total; ++k) owned_[k] = 0.0;
+    
+    #pragma omp parallel for schedule(static)
+    for (size_t r{}; r < rows_; ++r){
+        for (size_t c{}; c < stride_; ++c){
+            base_[r * stride_ + c] = 0.0;
+        }
+    }
   }
 
   double& operator()(std::size_t i, std::size_t j)       { return base_[i * stride_ + j]; }
@@ -82,10 +88,9 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid){
     // processing boundary rows first to avoid conditional checks for each iteration of double forloop
     // top and bottom rows
     const std::size_t bottom{(m - 1) * stride};
-    for (std::size_t j = 0; j < n; ++j) {
-        dst[j] = src[j];
-        dst[bottom + j] = src[bottom + j];
-    }
+
+    std::memcpy(dst, src, stride * sizeof(double));
+    std::memcpy(dst + bottom, src + bottom, stride * sizeof(double));
 
     // Left/right columns are folded into the interior loop rather than done in a
     // separate pass. A separate pass is worse for performance (i think) as it accesses new cache line
