@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <thread>
+#include <vector>
 
 // Starter Grid for the 2D heat-diffusion problem.
 //
@@ -11,7 +13,7 @@ class Grid {
 private:
   std::size_t rows_;
   std::size_t cols_;
-  double* data_;
+  std::vector<double> data_;
 
 public:
   Grid(std::size_t rows, std::size_t cols);
@@ -31,7 +33,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid);
 Grid::Grid(std::size_t rows, std::size_t cols)
   : rows_{rows}
   , cols_{cols}
-  , data_{new double[rows * cols]}
+  , data_(rows * cols, 0.0)
 {
 }
 
@@ -56,12 +58,31 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     new_grid(0, col) = old_grid(0, col);
     new_grid(rows - 1, col) = old_grid(rows - 1, col);
   }
+  if(rows < 3 || cols < 3) return;
 
-  for (std::size_t row{1}; row < rows - 1; ++row) {
+  std::vector<std::thread> threads;
+  const std::size_t num_threads{4};
+  threads.reserve(num_threads);
+
+  auto compute = [&](std::size_t start_row, std::size_t end_row) {for (std::size_t row{start_row}; row <= end_row; ++row) {
     for (std::size_t col{1}; col < cols - 1; ++col) {
       new_grid(row, col) = 0.5   * old_grid(row, col) +
                            0.125 * (old_grid(row - 1, col) + old_grid(row + 1, col) +
                                     old_grid(row, col - 1) + old_grid(row, col + 1));
     }
+  }};
+  const std::size_t rows_per_thread = (rows - 2) / num_threads;
+  const std::size_t remaining_rows = (rows - 2) % num_threads;
+  std::size_t start_row = 1;
+  for (std::size_t i = 0; i < num_threads; ++i) {
+    std::size_t end_row = start_row + rows_per_thread - 1;
+    if (i < remaining_rows) {
+      end_row += 1;
+    }
+    threads.emplace_back(compute, start_row, end_row);
+    start_row = end_row + 1;
+  }
+  for (auto& thread : threads) {
+    if(thread.joinable()) thread.join();
   }
 }
