@@ -45,8 +45,8 @@ public:
     base_ = owned_.get() + (doublesPerLine - 1);
     
     #pragma omp parallel for schedule(static)
-    for (size_t r{}; r < rows_; ++r){
-        for (size_t c{}; c < stride_; ++c){
+    for (size_t r = 0; r < rows_; ++r){
+        for (size_t c = 0; c < stride_; ++c){
             base_[r * stride_ + c] = 0.0;
         }
     }
