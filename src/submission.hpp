@@ -34,31 +34,28 @@ inline void apply_stencil(const Grid &old_grid, Grid &new_grid) {
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
   // source starting point
-  const double *src_add = old_grid.data();
-  double *dst_add = new_grid.data();
+  
+  const double *__restrict src_add = old_grid.data();
+  double *__restrict dst_add = new_grid.data();
 
   std::memcpy(dst_add, src_add, cols * sizeof(double));
-  std::memcpy((dst_add + (cols * (rows - 1))), (src_add + (cols * (rows - 1))),
+  std::memcpy((dst_add + (cols * (rows - 1))), 
+              (src_add + (cols * (rows - 1))), 
               cols * sizeof(double));
 
-  // left column
-  for (std::size_t i = 0; i < rows; ++i) {
-    new_grid(i, 0) = old_grid(i, 0);
-  }
-
-  // right column
-  for (std::size_t i = 0; i < rows; ++i) {
-    new_grid(i, cols - 1) = old_grid(i, cols - 1);
-  }
-
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
   for (std::size_t i = 1; i < rows - 1; ++i) {
 
-    const double* up = old_grid.data() + ((i-1) * cols);  
-    const double* mid = old_grid.data() + (i * cols);  
-    const double* down = old_grid.data() + ((i+1) * cols);  
-    double* write_add = new_grid.data() + (i * cols);
-    
+    const double* up = src_add + ((i-1) * cols);  
+    const double* mid = src_add + (i * cols);  
+    const double* down = src_add + ((i+1) * cols);  
+    double* write_add = dst_add + (i * cols);
+
+    // copy first and last value of each row
+    write_add[0] = mid[0];
+    write_add[cols - 1] = mid[cols - 1];
+
+    #pragma omp simd
     for (std::size_t j = 1; j < cols - 1; ++j) {
       write_add[j] = 0.5 * mid[j] + 0.125 * (mid[j+1] + mid[j-1] + up[j] + down[j]);
     }
