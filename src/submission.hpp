@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <vector>
+#include <cstring>
 
 // Starter Grid for the 2D heat-diffusion problem.
 //
@@ -66,10 +67,8 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     double*  __restrict__ output = new_grid.data();
 
     // Pre-fill the first and last rows with the existing old_grid values
-    for (int boundary = 0; boundary < cols; boundary++) {
-        new_grid(0, boundary) = old_grid(0, boundary);
-        new_grid(rows-1, boundary) = old_grid(rows-1, boundary);
-    }
+    std::memcpy(output, input, cols * sizeof(double));
+    std::memcpy(&output[(rows-1)*cols], &input[(rows-1)*cols], cols*sizeof(double));
 
     // OpenMP compiler directive will split the calculations for all rows between multiple threads so that they can happen simultaneously
     // The task is thread-safe because old_grid is not being modified, and the new_grid values that are being modified are separate from each other
