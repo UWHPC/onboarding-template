@@ -31,8 +31,21 @@ public:
   std::size_t columns() const { return cols_; }
   std::size_t rows() const { return rows_; }
 
-  const double* rowStart(std::size_t row) const {
+  const double* rowStart(int row) const {
       return &values_[row * cols_];
+  }
+
+  double* rowStart(int row) {
+      return &values_[row * cols_];
+  }
+
+  // Return the first value in contiguous memory
+  const double* data() const {
+      return values_.data();
+  }
+
+   double* data() {
+      return values_.data();
   }
 
 };
@@ -45,24 +58,36 @@ public:
 // values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid& old_grid, Grid& new_grid) {
 
+    std::size_t rows = old_grid.rows();
+    std::size_t cols = old_grid.columns();
+
+    // Promise to the compiler that the input and output do not overlap
+    const double* __restrict__ input = old_grid.data();
+    double*  __restrict__ output = new_grid.data();
+
     // Pre-fill the first and last rows with the existing old_grid values
-    for (int boundary = 0; boundary < old_grid.columns(); boundary++) {
+    for (int boundary = 0; boundary < cols; boundary++) {
         new_grid(0, boundary) = old_grid(0, boundary);
-        new_grid(old_grid.rows()-1, boundary) = old_grid(old_grid.rows()-1, boundary);
+        new_grid(rows-1, boundary) = old_grid(rows-1, boundary);
     }
 
+    // OpenMP compiler directive will split the calculations for all rows between multiple threads so that they can happen simultaneously
+    // The task is thread-safe because old_grid is not being modified, and the new_grid values that are being modified are separate from each other
     #pragma omp parallel for
-    for (int i = 1; i < old_grid.rows()-1; i++) {
+    for (int i = 1; i < rows-1; i++) {
 
         // For each row, set the left and right boundaries beforehand
         new_grid(i, 0) = old_grid(i, 0);
-        new_grid(i, old_grid.columns()-1) = old_grid(i, old_grid.columns()-1);
+        new_grid(i, cols-1) = old_grid(i, cols-1);
 
+        // Set pointers to the start of all 3 required rows so that we don't have to keep recalculating the position of a cell using operator()
         const double* prevRow = old_grid.rowStart(i-1);
         const double* currRow = old_grid.rowStart(i);
         const double* nextRow = old_grid.rowStart(i+1);
 
-        for (int j = 1; j < old_grid.columns()-1; j++) {
+        double* outputRow = &output[i*cols];
+
+        for (int j = 1; j < cols-1; j++) {
             double oldVal = currRow[j];
             double oldAbove = prevRow[j];
             double oldBelow = nextRow[j];
