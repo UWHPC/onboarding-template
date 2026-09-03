@@ -31,6 +31,10 @@ public:
   std::size_t columns() const { return cols_; }
   std::size_t rows() const { return rows_; }
 
+  const double* rowStart(std::size_t row) const {
+      return &values_[row * cols_];
+  }
+
 };
 
 // new_arr[i][j] = 0.5   * old_arr[i][j] +
@@ -53,16 +57,19 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         new_grid(i, 0) = old_grid(i, 0);
         new_grid(i, old_grid.columns()-1) = old_grid(i, old_grid.columns()-1);
 
+        const double* prevRow = old_grid.rowStart(i-1);
+        const double* currRow = old_grid.rowStart(i);
+        const double* nextRow = old_grid.rowStart(i+1);
+
         for (int j = 1; j < old_grid.columns()-1; j++) {
-            double oldVal = old_grid(i, j);
-            double oldAbove = old_grid(i-1, j);
-            double oldBelow = old_grid(i+1, j);
-            double oldLeft = old_grid(i, j-1);
-            double oldRight = old_grid(i, j+1);
+            double oldVal = currRow[j];
+            double oldAbove = prevRow[j];
+            double oldBelow = nextRow[j];
+            double oldLeft = currRow[j-1];
+            double oldRight = currRow[j+1];
 
             new_grid(i, j) = (0.5 * oldVal) +
                 0.125 * (oldAbove  + oldBelow + oldLeft + oldRight);
-
         }
     }
 }
