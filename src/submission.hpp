@@ -51,6 +51,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         new_grid(old_grid.rows()-1, boundary) = old_grid(old_grid.rows()-1, boundary);
     }
 
+    #pragma omp parallel for
     for (int i = 1; i < old_grid.rows()-1; i++) {
 
         // For each row, set the left and right boundaries beforehand
@@ -73,3 +74,21 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         }
     }
 }
+
+// After implementing OpenMP:
+// === 1 threads ===
+// {"runtime_ms": 149.334, "memory_mb": 16.777, "score": 0.995}
+// === 2 threads ===
+// {"runtime_ms": 85.999, "memory_mb": 16.777, "score": 1.746}
+// === 3 threads ===
+// {"runtime_ms": 64.496, "memory_mb": 16.777, "score": 2.417}
+// === 4 threads ===
+// {"runtime_ms": 55.682, "memory_mb": 16.777, "score": 2.835}
+// === 5 threads ===
+// {"runtime_ms": 57.377, "memory_mb": 16.777, "score": 2.678}
+// === 6 threads ===
+// {"runtime_ms": 56.655, "memory_mb": 16.777, "score": 2.780}
+// === 7 threads ===
+// {"runtime_ms": 62.279, "memory_mb": 16.777, "score": 2.520}
+// === 8 threads ===
+// {"runtime_ms": 63.506, "memory_mb": 16.777, "score": 2.417}
