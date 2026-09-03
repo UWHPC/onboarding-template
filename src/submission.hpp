@@ -73,7 +73,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
 
     // OpenMP compiler directive will split the calculations for all rows between multiple threads so that they can happen simultaneously
     // The task is thread-safe because old_grid is not being modified, and the new_grid values that are being modified are separate from each other
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
     for (int i = 1; i < rows-1; i++) {
 
         // For each row, set the left and right boundaries beforehand
