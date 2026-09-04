@@ -72,7 +72,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
 
     // OpenMP compiler directive will split the calculations for all rows between multiple threads so that they can happen simultaneously
     // The task is thread-safe because old_grid is not being modified, and the new_grid values that are being modified are separate from each other
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for
     for (int i = 1; i < rows-1; i++) {
 
         // For each row, set the left and right boundaries beforehand
@@ -80,9 +80,9 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         new_grid(i, cols-1) = old_grid(i, cols-1);
 
         // Set pointers to the start of all 3 required rows so that we don't have to keep recalculating the position of a cell using operator()
-        const double* prevRow = old_grid.rowStart(i-1);
-        const double* currRow = old_grid.rowStart(i);
-        const double* nextRow = old_grid.rowStart(i+1);
+        const double* prevRow = &input[(i-1)*cols];
+        const double* currRow = &input[(i)*cols];
+        const double* nextRow = &input[(i+1)*cols];
 
         double* outputRow = &output[i*cols];
 
@@ -93,7 +93,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
             double oldLeft = currRow[j-1];
             double oldRight = currRow[j+1];
 
-            new_grid(i, j) = (0.5 * oldVal) +
+            outputRow[j] = (0.5 * oldVal) +
                 0.125 * (oldAbove  + oldBelow + oldLeft + oldRight);
         }
     }
