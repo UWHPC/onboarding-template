@@ -13,17 +13,17 @@ private:
   std::size_t rows_;
   std::size_t cols_;
 
-  std::vector<std::vector<double>> grid;
+  std::vector<double> grid;
 
 public:
-  Grid(std::size_t rows, std::size_t cols) : rows_ {rows}, cols_ {cols}, grid(rows, std::vector<double>(cols, 0)) {}
+  Grid(std::size_t rows, std::size_t cols) : rows_ {rows}, cols_ {cols}, grid(rows*cols, 0) {}
 
   double& operator()(std::size_t i, std::size_t j) {
-    return grid.at(i).at(j);
+    return grid.at(i * cols_ + j);
   }
 
   double operator()(std::size_t i, std::size_t j) const {
-    return grid.at(i).at(j);
+    return grid.at(i * cols_ + j);
   }
 
   std::size_t getRows() const {
