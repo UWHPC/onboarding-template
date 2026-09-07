@@ -33,33 +33,51 @@ public:
   std::size_t getCols() const {
     return cols_;
   }
+
+  double* data() {
+    return grid.data();
+  }
+
+  const double* data() const {
+    return grid.data();
+  }
+
 };  
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
 void apply_stencil(const Grid& old_grid, Grid& new_grid) {
 
-  // DEFINING THE CONSTANTS
+  // Defining the constants
   const std::size_t ROWS = old_grid.getRows();
   const std::size_t COLS = old_grid.getCols();
 
-  // SETTING THE EXTERIOR POINTS 
+  // Getting pointers to the data with restrict to allow vectorization
+  const double* __restrict old_p = old_grid.data();
+  double* __restrict new_p = new_grid.data();
+
+  // Setting the exterior points
   for (std::size_t r = 0; r < ROWS; ++r) {
-    new_grid(r, 0) = old_grid(r, 0);
-    new_grid(r, COLS - 1) = old_grid(r, COLS - 1);
+    new_p[r * COLS + 0] = old_p[r * COLS + 0];
+    new_p[r * COLS + COLS - 1] = old_p[r * COLS + COLS - 1];
   }
 
   for (std::size_t c = 0; c < COLS; ++c) {
-    new_grid(0, c) = old_grid(0,c);
-    new_grid(ROWS - 1, c) = old_grid(ROWS - 1, c);
+    new_p[c] = old_p[c];
+    new_p[(ROWS - 1) * (COLS) + c] = old_p[(ROWS - 1) * (COLS) + c];
   }
 
-  // SETTING THE INTERIOR POINTS
+  // Setting the interior points
   for (std::size_t r = 1; r < ROWS - 1; ++r) {
+    
+    // Precalculating variables based on 'r'
+    const double* up = old_p + (r - 1)*COLS;
+    const double* mid = old_p + r * COLS;
+    const double* down = old_p + (r + 1)*COLS;
+    double* out = new_p + r * COLS;
+
     for (std::size_t c = 1; c < COLS - 1; ++c) {
-      new_grid(r, c) = 0.5 * old_grid(r, c) +
-                       0.125 * (old_grid(r - 1, c) + old_grid(r + 1, c) + 
-                                old_grid(r, c - 1) + old_grid(r, c + 1)); 
+      out[c] = 0.5*mid[c] + 0.125*(up[c] + down[c] + mid[c - 1] + mid[c + 1]);
     }
   }
 }
