@@ -57,14 +57,20 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
   double* __restrict new_p = new_grid.data();
 
   // Setting the exterior points
+  // First and last columns
+  const std::size_t LAST_COL = COLS - 1; 
+
   for (std::size_t r = 0; r < ROWS; ++r) {
-    new_p[r * COLS + 0] = old_p[r * COLS + 0];
-    new_p[r * COLS + COLS - 1] = old_p[r * COLS + COLS - 1];
+    new_p[r * COLS] = old_p[r * COLS];
+    new_p[r * COLS + LAST_COL] = old_p[r * COLS + LAST_COL];
   }
+
+  // First and last rows
+  const std::size_t LAST_ROW_POS = (ROWS - 1) * (COLS);
 
   for (std::size_t c = 0; c < COLS; ++c) {
     new_p[c] = old_p[c];
-    new_p[(ROWS - 1) * (COLS) + c] = old_p[(ROWS - 1) * (COLS) + c];
+    new_p[LAST_ROW_POS + c] = old_p[LAST_ROW_POS + c];
   }
 
   // Setting the interior points
