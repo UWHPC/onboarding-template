@@ -12,28 +12,29 @@ class Grid {
 private:
   std::size_t rows_;
   std::size_t cols_;
-  std::vector<std::vector<double>> grid_;
+  std::vector<double> grid_;
 public:
   // set rows and cols
   Grid(std::size_t rows, std::size_t cols) {
     rows_ = rows;
     cols_ = cols;
     // set all elements in grid to 0.0
-    grid_ = std::vector<std::vector<double>>(rows, std::vector<double>(cols,0.0));
+    grid_ = std::vector<double>(rows * cols, 0.0);
   }
+  // row major order
   // read/write access
   double& operator()(std::size_t i, std::size_t j) {
-    return grid_[i][j];
+    return grid_[i * cols_ + j];
   }
   // read-only access
   double  operator()(std::size_t i, std::size_t j) const {
-    return grid_[i][j];
+    return grid_[i * cols_ + j];
   }
-  // getter for rows
+  // getter for rows read-only
   std::size_t get_rows() const {
     return rows_;
   }
-  // getter for cols
+  // getter for cols read-only
   std::size_t get_cols() const {
     return cols_;
   }
