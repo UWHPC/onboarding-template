@@ -126,7 +126,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         //0.5 * original + 0.125(top + bot + left + right)
         V sum_neighbors = top + bot + left + right;
         V res = v_half * c + v_eighth * sum_neighbors;
-        res.copy_to(r_dst + j, stdx::vector_aligned);
+        res.copy_to(r_dst + j + 1, stdx::vector_aligned);
       }
       //Cleaner upper loop
       for (; j < cols-1; ++j) {
