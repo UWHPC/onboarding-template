@@ -8,6 +8,7 @@
       "binaryDir": "${sourceDir}/build/benchmark",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "CMAKE_CXX_FLAGS_RELEASE": "-O3"
       }
     }
