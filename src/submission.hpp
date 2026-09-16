@@ -77,18 +77,14 @@ public:
   }
 };
 
-// Apply the five-point stencil over all interior points, copying the boundary
-// values unchanged from old_grid to new_grid. Implement your solution here.
-inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
-  const ConstGridView old_view = old_grid.view();
-  GridView new_view = new_grid.view();
 
+// Does the actual stencil work using non-owning views.
+inline void stencil_kernel(
+  const ConstGridView& old_view,
+  GridView& new_view
+) {
   const std::size_t rows = old_view.rows;
   const std::size_t cols = old_view.cols;
-
-  if (rows == 0 || cols == 0) {
-    return;
-  }
 
   const double* __restrict old_data = old_view.data;
   double* __restrict new_data = new_view.data;
@@ -102,6 +98,7 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     return;
   }
 
+  // Top and bottom rows stay unchanged.
   std::memcpy(
     new_data,
     old_data,
@@ -109,7 +106,7 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
   );
 
   std::memcpy(
-    new_data + (rows - 1) * old_view.stride,
+    new_data + (rows - 1) * new_view.stride,
     old_data + (rows - 1) * old_view.stride,
     cols * sizeof(double)
   );
@@ -121,6 +118,7 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     const double* bottom = old_data + (i + 1) * old_view.stride;
     double* out = new_data + i * new_view.stride;
 
+    // Keep the side boundaries unchanged.
     out[0] = mid[0];
     out[cols - 1] = mid[cols - 1];
 
@@ -136,4 +134,18 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
           );
     }
   }
+}
+
+
+// Apply the five-point stencil over all interior points, copying the boundary
+// values unchanged from old_grid to new_grid. Implement your solution here.
+inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
+  ConstGridView old_view = old_grid.view();
+  GridView new_view = new_grid.view();
+
+  if (old_view.rows == 0 || old_view.cols == 0) {
+    return;
+  }
+
+  stencil_kernel(old_view, new_view);
 }
