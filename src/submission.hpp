@@ -1,8 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
-#include <vector>
+#include <memory>
 
 // Starter Grid for the 2D heat-diffusion problem.
 //
@@ -31,23 +32,71 @@ struct GridView {
   }
 };
 
+struct FreeDeleter {
+  void operator()(double* ptr) const {
+    std::free(ptr);
+  }
+};
+
 class Grid {
 private:
+  static constexpr std::size_t alignment_ = 64;
+  static constexpr std::size_t doubles_per_line_ =
+      alignment_ / sizeof(double);
+
   std::size_t rows_;
   std::size_t cols_;
-  std::vector<double> data_;
+  std::size_t stride_;
+
+  std::unique_ptr<double, FreeDeleter> data_;
+
+  static std::size_t make_stride(std::size_t cols) {
+    if (cols == 0) {
+      return 0;
+    }
+
+    // Round up to a full cache line, then add one more line of padding.
+    const std::size_t rounded =
+        ((cols + doubles_per_line_ - 1) / doubles_per_line_)
+        * doubles_per_line_;
+
+    return rounded + doubles_per_line_;
+  }
 
 public:
   Grid(std::size_t rows, std::size_t cols)
-    : rows_(rows), cols_(cols), data_(rows * cols) {
+    : rows_(rows),
+      cols_(cols),
+      stride_(make_stride(cols)),
+      data_(nullptr) {
+
+    if (rows_ == 0 || stride_ == 0) {
+      return;
+    }
+
+    const std::size_t count = rows_ * stride_;
+    const std::size_t bytes = count * sizeof(double);
+
+    double* ptr = static_cast<double*>(
+      std::aligned_alloc(alignment_, bytes)
+    );
+
+    if (ptr == nullptr) {
+      throw std::bad_alloc();
+    }
+
+    // aligned_alloc does not initialize the memory for us.
+    std::memset(ptr, 0, bytes);
+
+    data_.reset(ptr);
   }
 
   double& operator()(std::size_t i, std::size_t j) {
-    return data_[i * cols_ + j];
+    return data_.get()[i * stride_ + j];
   }
 
   double operator()(std::size_t i, std::size_t j) const {
-    return data_[i * cols_ + j];
+    return data_.get()[i * stride_ + j];
   }
 
   std::size_t rows() const {
@@ -60,19 +109,19 @@ public:
 
   ConstGridView view() const {
     return {
-      data_.data(),
+      data_.get(),
       rows_,
       cols_,
-      cols_
+      stride_
     };
   }
 
   GridView view() {
     return {
-      data_.data(),
+      data_.get(),
       rows_,
       cols_,
-      cols_
+      stride_
     };
   }
 };
@@ -98,7 +147,6 @@ inline void stencil_kernel(
     return;
   }
 
-  // Top and bottom rows stay unchanged.
   std::memcpy(
     new_data,
     old_data,
@@ -118,7 +166,6 @@ inline void stencil_kernel(
     const double* bottom = old_data + (i + 1) * old_view.stride;
     double* out = new_data + i * new_view.stride;
 
-    // Keep the side boundaries unchanged.
     out[0] = mid[0];
     out[cols - 1] = mid[cols - 1];
 
