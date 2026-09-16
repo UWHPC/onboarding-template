@@ -111,12 +111,19 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
       double* __restrict__       r_dst  = dst + i * stride;
 
 
+      r_dst[0] = r_curr[0];
 
-      std::size_t j = 0;
+      std::size_t j = 1;
+
+      constexpr size_t ALIGNED_START = LANES;
+
+      for (; j < ALIGNED_START && j < cols - 1; ++j) {
+        r_dst[j] = 0.5 * r_curr[j] +
+                   0.125 * (r_top[j] + r_bot[j] + r_curr[j - 1] + r_curr[j + 1]);
+      }
       //loop thru cols
       for (; j + LANES <= cols-1; j += LANES) {
-        if (j == 0)
-          r_dst[0] = r_curr[0]; //copy the left boundary element
+        //copy the left boundary element
         V c;      c.copy_from(r_curr + j, stdx::vector_aligned);
         V top;    top.copy_from(r_top + j, stdx::vector_aligned);
         V bot;    bot.copy_from(r_bot + j, stdx::vector_aligned);
@@ -126,7 +133,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         //0.5 * original + 0.125(top + bot + left + right)
         V sum_neighbors = top + bot + left + right;
         V res = v_half * c + v_eighth * sum_neighbors;
-        res.copy_to(r_dst + j + 1, stdx::vector_aligned);
+        res.copy_to(r_dst + j, stdx::vector_aligned);
       }
       //Cleaner upper loop
       for (; j < cols-1; ++j) {
