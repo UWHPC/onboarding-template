@@ -9,6 +9,28 @@
 // The evaluation harness uses operator() to set initial conditions and to read
 // results; it never touches your internal storage. Keep this interface,
 // everything else is yours.
+struct ConstGridView {
+  const double* data;
+  std::size_t rows;
+  std::size_t cols;
+  std::size_t stride;
+
+  double operator()(std::size_t i, std::size_t j) const {
+    return data[i * stride + j];
+  }
+};
+
+struct GridView {
+  double* data;
+  std::size_t rows;
+  std::size_t cols;
+  std::size_t stride;
+
+  double& operator()(std::size_t i, std::size_t j) {
+    return data[i * stride + j];
+  }
+};
+
 class Grid {
 private:
   std::size_t rows_;
@@ -36,42 +58,50 @@ public:
     return cols_;
   }
 
-  // Gives the stencil direct access to the contiguous storage.
-  double* data() {
-    return data_.data();
+  ConstGridView view() const {
+    return {
+      data_.data(),
+      rows_,
+      cols_,
+      cols_
+    };
   }
 
-  const double* data() const {
-    return data_.data();
+  GridView view() {
+    return {
+      data_.data(),
+      rows_,
+      cols_,
+      cols_
+    };
   }
 };
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
-  const std::size_t rows = old_grid.rows();
-  const std::size_t cols = old_grid.cols();
+  const ConstGridView old_view = old_grid.view();
+  GridView new_view = new_grid.view();
+
+  const std::size_t rows = old_view.rows;
+  const std::size_t cols = old_view.cols;
 
   if (rows == 0 || cols == 0) {
     return;
   }
 
-  // The benchmark uses separate input and output grids, so these buffers
-  // do not overlap.
-  const double* __restrict old_data = old_grid.data();
-  double* __restrict new_data = new_grid.data();
+  const double* __restrict old_data = old_view.data;
+  double* __restrict new_data = new_view.data;
 
-  // Small grids have no interior points, so everything is boundary.
   if (rows < 3 || cols < 3) {
     for (std::size_t i = 0; i < rows; ++i) {
       for (std::size_t j = 0; j < cols; ++j) {
-        new_grid(i, j) = old_grid(i, j);
+        new_view(i, j) = old_view(i, j);
       }
     }
     return;
   }
 
-  // Top and bottom rows are contiguous, so copy them as blocks.
   std::memcpy(
     new_data,
     old_data,
@@ -79,17 +109,17 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
   );
 
   std::memcpy(
-    new_data + (rows - 1) * cols,
-    old_data + (rows - 1) * cols,
+    new_data + (rows - 1) * old_view.stride,
+    old_data + (rows - 1) * old_view.stride,
     cols * sizeof(double)
   );
 
   #pragma omp parallel for schedule(static)
   for (std::size_t i = 1; i < rows - 1; ++i) {
-    const double* top = old_data + (i - 1) * cols;
-    const double* mid = old_data + i * cols;
-    const double* bottom = old_data + (i + 1) * cols;
-    double* out = new_data + i * cols;
+    const double* top = old_data + (i - 1) * old_view.stride;
+    const double* mid = old_data + i * old_view.stride;
+    const double* bottom = old_data + (i + 1) * old_view.stride;
+    double* out = new_data + i * new_view.stride;
 
     out[0] = mid[0];
     out[cols - 1] = mid[cols - 1];
