@@ -47,6 +47,11 @@ Use the commands above rather than an IDE's own CMake integration. Those default
 to a Debug build, which will cost you most of your score. See the
 [problem statement](https://docs.uwhpc.com/onboarding/problem-statement/) for what the number means.
 
+Run them all together with:
+```
+cmd.exe /c 'run.bat'
+```
+
 ## Submitting
 
 Submissions are a **pull request from your own fork** — no credentials or
