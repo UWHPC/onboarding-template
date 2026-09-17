@@ -37,7 +37,7 @@ double initial_temperature(
 ) {
   switch (condition) {
     case InitialCondition::kCenterBlock: {
-      const std::size_t block_row_begin{rows / 2 - rows / 8};
+      const std::size_t block_row_begin{rows / 2  - rows / 8};
       const std::size_t block_row_end{rows / 2 + rows / 8};
       const std::size_t block_col_begin{cols / 2 - cols / 8};
       const std::size_t block_col_end{cols / 2 + cols / 8};
