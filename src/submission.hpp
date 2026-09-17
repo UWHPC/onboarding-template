@@ -38,7 +38,7 @@ inline double five_point_stencil(const double* __restrict__ src, std::size_t off
                                            src[offset - 1] + src[offset + 1]);
 }
 
-void apply_stencil(const Grid &old_grid, Grid &new_grid) {
+void inline apply_stencil(const Grid &old_grid, Grid &new_grid) {
     Dimensions dimensions{old_grid.get_dimensions()};
 
     const double* __restrict__ src = old_grid.data();
