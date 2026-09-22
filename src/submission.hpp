@@ -33,7 +33,18 @@ public:
 
 // Apply the five-point stencil over all interior points, copying the boundary
 // values unchanged from old_grid to new_grid. Implement your solution here.
-void apply_stencil(const Grid &old_grid, Grid &new_grid) {
+
+// Inline since the docs state "The submission is a header, so anything with
+// external linkage has to stay safe when more than one translation unit
+// includes it"
+
+// Restrict had no difference on the assembly - and it doesn't have a huge cost.
+// The compiler generates two variations: one where it can SIMD, and one where
+// the pointers overlap. It does an address comparison at runtime to figure out
+// which one to dispatch. The overlapping pointer case should never happen -
+// that would make the stencil kernel wrong, so it would never take the slow,
+// non-SIMD path.
+inline void apply_stencil(const Grid &old_grid, Grid &new_grid) {
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
 
