@@ -1,3 +1,9 @@
+# Profiler output
+perf.data
+
+# My tests, bash scripts, and exploratory work
+lab/
+
 .DS_Store
 
 # Prerequisites
