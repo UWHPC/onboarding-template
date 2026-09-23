@@ -3,6 +3,34 @@
 #include <cstring>
 #include <cstdlib>
 #include <memory>
+#include <omp.h>
+#include <pthread.h>
+#include <sched.h>
+
+// pin threads to a cpu core
+// on re-reads previous values will be in higher caches
+inline void pin_threads_once() {
+    static bool done = false; // threads are assigned once, no re-pinning overhead
+    if (done) return;
+    done = true;
+
+    cpu_set_t allowed;
+    if (sched_getaffinity(0, sizeof allowed, &allowed) != 0) return;
+
+    #pragma omp parallel
+    {
+        int target = omp_get_thread_num() % CPU_COUNT(&allowed);
+        for (int c = 0; c < CPU_SETSIZE; ++c) {
+            if (CPU_ISSET(c, &allowed) && target-- == 0) {
+                cpu_set_t one;
+                CPU_ZERO(&one);
+                CPU_SET(c, &one);
+                pthread_setaffinity_np(pthread_self(), sizeof one, &one);
+                break;
+            }
+        }
+    }
+}
 
 template <std::size_t Alignement, typename T>
 static constexpr T* assume_aligned(T* ptr) noexcept {
@@ -51,25 +79,17 @@ public:
     Grid& operator=(const Grid&) = delete;
 };
 
-void copy_border(const Grid& old_grid, Grid& new_grid, const std::size_t& rows,
-                const std::size_t& cols, const std::size_t row_width)
+// Top and bottom rows only, left/right columns are copied inside the stencil loop while hot on L1
+inline void copy_top_bottom(const Grid& old_grid, Grid& new_grid,
+                            const std::size_t rows, const std::size_t row_width)
 {
-    const double* __restrict src= old_grid.data();
-    double* __restrict dst= new_grid.data();
+    const double* __restrict src = old_grid.data();
+    double* __restrict dst = new_grid.data();
+    const std::size_t bytes = row_width * sizeof(double);
+    const std::size_t last  = row_width * (rows - 1);
 
-    std::memcpy(dst, src, row_width*sizeof(double));
-    const std::size_t offset = row_width *(rows-1);
-    std::memcpy(dst+offset, src+offset, row_width*sizeof(double));
-
-    #pragma omp simd
-    for (std::size_t i = 0; i < rows-1; ++i) {
-        const std::size_t start= i*row_width;
-        dst[start]= src[start];
-        dst[start+cols-1]= src[start+cols-1];
-
-    }
-
-
+    std::memcpy(dst, src, bytes);
+    std::memcpy(dst + last, src + last, bytes);
 }
 
 void apply_stencil(const Grid& old_grid, Grid& new_grid) {
@@ -80,7 +100,8 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     const double* __restrict src= assume_aligned<64>(old_grid.data());
     double* __restrict dst= assume_aligned<64>(new_grid.data());
 
-    #pragma omp parallel for schedule(static) proc_bind(close)
+    pin_threads_once(); // assign a thread to a core
+    #pragma omp parallel for schedule(static)
 
     for (size_t r = 1; r < rows - 1; r++) {
     const double* __restrict src_curr = src + (r * row_width);
@@ -94,7 +115,10 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
                       0.125 * (src_prev[c] + src_next[c] +
                                src_curr[c + 1] + src_curr[c - 1]);
     }
+    // left/right borders both values were just read by the loop above, so they're still in L1
+    dst_curr[0]        = src_curr[0];
+    dst_curr[cols - 1] = src_curr[cols - 1];
 }
-    /// border
-    copy_border(old_grid, new_grid,rows, cols, row_width);
+    /// top/bottom border
+    copy_top_bottom(old_grid, new_grid, rows, row_width);
 }
