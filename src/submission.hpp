@@ -48,11 +48,7 @@ inline void apply_stencil(const Grid &old_grid, Grid &new_grid) {
   std::size_t rows = old_grid.rows();
   std::size_t cols = old_grid.cols();
 
-  for (std::size_t r = 0; r < rows; r++) {
-    new_grid(r, 0) = old_grid(r, 0);
-    new_grid(r, cols - 1) = old_grid(r, cols - 1);
-  }
-
+  // Streams sequential in memory, SIMD
   for (std::size_t c = 0; c < cols; c++) {
     new_grid(0, c) = old_grid(0, c);
     new_grid(rows - 1, c) = old_grid(rows - 1, c);
@@ -60,10 +56,14 @@ inline void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 
 #pragma omp parallel for
   for (std::size_t r = 1; r < rows - 1; r++) {
+    // Put this into the parllel region, since these cache lines are about to be
+    // touched anyways.
+    new_grid(r, 0) = old_grid(r, 0);
     for (std::size_t c = 1; c < cols - 1; c++) {
       new_grid(r, c) = 0.5 * old_grid(r, c) +
                        0.125 * (old_grid(r - 1, c) + old_grid(r + 1, c) +
                                 old_grid(r, c - 1) + old_grid(r, c + 1));
     }
+    new_grid(r, cols - 1) = old_grid(r, cols - 1);
   }
 };
