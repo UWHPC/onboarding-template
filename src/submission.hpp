@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <type_traits>
 #include <vector>
 
 namespace detail {
@@ -50,25 +51,28 @@ bool operator!=(const aligned_allocator<T, Alignment>&, const aligned_allocator<
 }  // namespace detail
 
 // row(i) is the only way to a row base; nothing outside Grid indexes by cols.
-struct ConstGridView {
-  const double* data;
+// T = double is the writable view, T = const double the read-only one. The
+// converting constructor only exists when U* converts to T*, so a mutable view
+// becomes a const one and never the reverse.
+template <typename T>
+struct BasicGridView {
+  T* data;
   std::size_t rows;
   std::size_t cols;
   std::size_t stride;
 
-  const double* row(std::size_t i) const { return data + i * stride; }
+  BasicGridView(T* data_, std::size_t rows_, std::size_t cols_, std::size_t stride_)
+    : data{data_}, rows{rows_}, cols{cols_}, stride{stride_} { }
+
+  template <typename U, typename = std::enable_if_t<std::is_convertible_v<U*, T*>>>
+  BasicGridView(const BasicGridView<U>& other)
+    : data{other.data}, rows{other.rows}, cols{other.cols}, stride{other.stride} { }
+
+  T* row(std::size_t i) const { return data + i * stride; }
 };
 
-struct GridView {
-  double* data;
-  std::size_t rows;
-  std::size_t cols;
-  std::size_t stride;
-
-  double* row(std::size_t i) const { return data + i * stride; }
-
-  operator ConstGridView() const { return ConstGridView{data, rows, cols, stride}; }
-};
+using GridView = BasicGridView<double>;
+using ConstGridView = BasicGridView<const double>;
 
 class Grid {
 private:
