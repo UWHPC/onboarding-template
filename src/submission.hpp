@@ -10,6 +10,9 @@
 
 namespace detail {
 
+// The kernel's aligned clause relies on this.
+constexpr std::size_t kRowAlignmentBytes = 64;
+
 // 64-byte aligned so every row starts on a cache line.
 template <typename T, std::size_t Alignment>
 struct aligned_allocator {
@@ -50,10 +53,7 @@ bool operator!=(const aligned_allocator<T, Alignment>&, const aligned_allocator<
 
 }  // namespace detail
 
-// row(i) is the only way to a row base; nothing outside Grid indexes by cols.
-// T = double is the writable view, T = const double the read-only one. The
-// converting constructor only exists when U* converts to T*, so a mutable view
-// becomes a const one and never the reverse.
+// T = const double is the read-only view; conversion only goes mutable to const.
 template <typename T>
 struct BasicGridView {
   T* data;
@@ -76,7 +76,7 @@ using ConstGridView = BasicGridView<const double>;
 
 class Grid {
 private:
-  static constexpr std::size_t kAlignmentBytes = 64;
+  static constexpr std::size_t kAlignmentBytes = detail::kRowAlignmentBytes;
   static constexpr std::size_t kAlignmentDoubles = kAlignmentBytes / sizeof(double);
 
   // cols rounded up to a cache line; the padding is storage only.
@@ -114,12 +114,15 @@ inline void stencil_row(
   double* __restrict out,
   std::size_t cols
 ) {
-  out[0] = mid[0];
-#pragma omp simd
-  for (std::size_t j = 1; j < cols - 1; ++j) {
+  // j = 0 keeps every stream aligned; the two edge results are overwritten below.
+  const double* left = mid - 1;
+  const double* right = mid + 1;
+#pragma omp simd aligned(up, mid, down, out : kRowAlignmentBytes)
+  for (std::size_t j = 0; j < cols; ++j) {
     out[j] = 0.5 * mid[j] +
-             0.125 * (up[j] + down[j] + mid[j - 1] + mid[j + 1]);
+             0.125 * (up[j] + down[j] + left[j] + right[j]);
   }
+  out[0] = mid[0];
   out[cols - 1] = mid[cols - 1];
 }
 
