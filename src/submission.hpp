@@ -1,8 +1,29 @@
 #pragma once
 
 #include <cstddef>
+#include <new>
 #include <vector>
 #include <cstring>
+
+// allocator that aligns 2d array base pointer to 64 bytes
+template <typename T>
+struct AlignedAllocator {
+    static constexpr std::size_t kAlignment = 64;
+    using value_type = T;
+
+    AlignedAllocator() = default;
+    template <typename U> AlignedAllocator(const AlignedAllocator<U>&) noexcept {}
+
+    T* allocate(std::size_t n) {
+        if (n > static_cast<std::size_t>(-1) / sizeof(T)) throw std::bad_array_new_length();
+        return static_cast<T*>(::operator new(n * sizeof(T), std::align_val_t(kAlignment)));
+    }
+    void deallocate(T* p, std::size_t) noexcept { ::operator delete(p, std::align_val_t(kAlignment)); }
+};
+template <typename T, typename U>
+bool operator==(const AlignedAllocator<T>&, const AlignedAllocator<U>&) noexcept { return true; }
+template <typename T, typename U>
+bool operator!=(const AlignedAllocator<T>&, const AlignedAllocator<U>&) noexcept { return false; }
 
 // Starter Grid for the 2D heat-diffusion problem.
 //
@@ -13,7 +34,8 @@ class Grid {
 private:
     size_t rows_;
     size_t cols_;
-    std::vector<double> data_;
+    // 64-byte aligned base; every row start is aligned too when cols is a multiple of 8.
+    std::vector<double, AlignedAllocator<double>> data_;
 
 public:
     Grid(std::size_t rows, size_t cols) : rows_(rows), cols_(cols), data_(rows * cols, 0.0) {}
