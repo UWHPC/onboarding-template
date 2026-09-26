@@ -1,64 +1,24 @@
 # UWHPC Onboarding — 2D Heat Diffusion
 
-Starter repository for the UWHPC onboarding problem.
+The submission is `src/submission.hpp`. The harness times a 1024×1024 grid for 200 steps. The center block starts at 100 and the rest of the field starts at 0. Score is `reference_ms / runtime_ms`. A score above 0.9 passes. Problem statement: [UWHPC Onboarding](https://docs.uwhpc.com/onboarding/problem-statement/).
 
-Begin by completing the Google Form on the onboarding site below:
+## Techniques
 
-**The problem statement lives here: [UWHPC Onboarding](https://docs.uwhpc.com/onboarding/problem-statement/).** Read it first.
-This file only covers building and submitting.
+- **Hot rectangle.** Nonzero values written at setup record a rectangle. Each step that rectangle grows by one cell on each side, and only cells inside it are updated. It starts at rows 384–639 and columns 384–639 (256×256). After 200 steps it is 656×656 (rows 184–839, columns 184–839) and does not reach the outer edge. Interior cells updated: 44,436,400. Full interior over the same 200 steps: 208,896,800. Ratio: 0.213.
 
-## What you edit
+- **Flat layout.** One allocation, aligned to 64 bytes. Each row is padded to a multiple of 8 doubles. A 1024-wide row is 8192 bytes, a multiple of 4096, so 8 more doubles are added. Stride on this grid: 1032 doubles. One grid: 8,454,144 bytes.
 
-One file: [`src/submission.hpp`](src/submission.hpp). Both the `Grid` class and
-the `apply_stencil` function go there, and the interface your `Grid` has to
-provide is documented at the top of that file.
+- **Vector interior.** Where the compiler provides AVX2 and FMA, interior columns are computed 4 doubles at a time. On arm64 they are computed 2 doubles at a time with NEON. Columns left over at the ends of a row are computed one at a time. The runs below used NEON.
 
-Everything else (`bench/`, `CMakeLists.txt`, `CMakePresets.json`, etc) is the
-evaluation harness. **Don't edit it.**
+- **OpenMP rows.** When the rectangle has at least 16 rows and 64 columns, rows are split with `schedule(static)`. The threads are started in the `Grid` constructor, before the harness starts the timer. On this machine the default team size is 10. Every timed step is above that size cutoff.
 
-## Build & run
+## Local harness times
 
-Requires CMake ≥ 3.21, Ninja, and a C++17 compiler.
+Apple clang 17, arm64, `-O3`, five runs. Both builds use the hot rectangle, the padded layout, and NEON. They differ by whether OpenMP is linked.
 
-```bash
-cmake --preset benchmark                        # configure
-cmake --build --preset benchmark                # build
-ctest --preset benchmark --output-on-failure    # correctness test
-./build/benchmark/uwhpc_benchmark               # run the benchmark
-```
+| OpenMP | Runtime | Score |
+| --- | --- | --- |
+| off | 27.295–28.382 ms | 3.260–3.448 |
+| on (10 threads) | 13.133–15.007 ms | 6.372–7.295 |
 
-`--check` runs four public correctness cases. The evaluator runs those plus
-private cases you can't see here, so passing locally is necessary but not
-sufficient.
-
-The benchmark prints one line of JSON, where `score` is the harness's reference
-time divided by yours:
-
-```json
-{ "runtime_ms": 148.404, "memory_mb": 16.777, "score": 1.293 }
-```
-
-Your `score` is measured against a reference **baseline**: a score of `1.0` ties
-the baseline, above `1.0` beats it, and below means you're slower. **You need a
-score over `0.9` to pass** — the evaluator marks any submission below that as a
-failing check.
-
-Use the commands above rather than an IDE's own CMake integration. Those default
-to a Debug build, which will cost you most of your score. See the
-[problem statement](https://docs.uwhpc.com/onboarding/problem-statement/) for what the number means.
-
-## Submitting
-
-Submissions are a **pull request from your own fork** — no credentials or
-workflow changes needed.
-
-**Fork** this repository, implement your solution in
-`src/submission.hpp`, and open a **pull request** against
-`UWHPC/onboarding-template`. The evaluator runs automatically and posts a result
-comment on your PR with your build, test, and benchmark results. Keep pushing
-commits and re-running until you're happy with your result — the comment updates
-in place.
-
-Once you're satisfied with your submission, join the UWHPC Discord from our
-**[contact page](https://www.uwhpc.com/contact)** and make a post in the
-**onboarding** forum channel with your name and a link to your pull request.
+The score moves with the reference time on that run. These numbers are from my dev machine, not the evaluator.
