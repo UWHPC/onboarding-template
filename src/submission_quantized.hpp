@@ -23,23 +23,15 @@
 #include <stdint.h>
 #include <vector>
 
-// Starter Grid for the 2D heat-diffusion problem.
-//
-// The evaluation harness uses operator() to set initial conditions and to read
-// results; it never touches your internal storage. Keep this interface,
-// everything else is yours.
 
-// Aligns storage to 64 bytes and pads the stride so every row starts aligned.
+// This is the exact same as my regular submission. 
 template <typename T>
 class PaddedAlignedVector {
 private:
-  // Target the 64-byte cache lines on x86 CPUs.
   static constexpr std::size_t CACHE_ALIGNMENT{64};
 
   static_assert(CACHE_ALIGNMENT % sizeof(T) == 0);
   static constexpr std::size_t elements_per_line{CACHE_ALIGNMENT / sizeof(T)};
-
-  // Cache alignment clas to be fed to vector for 64 addres-space alignment
   template <typename U>
   class CacheAlignAllocator {
   public:
@@ -50,8 +42,6 @@ private:
     template <typename V>
     CacheAlignAllocator(const CacheAlignAllocator<V>&) noexcept {}
 
-    // This is necessary becaause vector compares allocaator during copying.
-    // This is necessary for copying the Grid be possible as a precaution.
     template <typename V>
     bool operator==(const CacheAlignAllocator<V>&) const noexcept {
       return true;
@@ -75,7 +65,6 @@ private:
     }
   };
 
-  // Physical row spacing includes padding; callers address logical cells only.
   std::size_t stride_;
 
   std::vector<T, CacheAlignAllocator<T>> storage_;
@@ -89,7 +78,6 @@ public:
 
     stride_ = (cols + elements_per_line - 1) / elements_per_line * elements_per_line;
 
-    // Check the total byte size before multiplying either dimension.
     if (stride_ != 0 && rows > (max_size / sizeof(T)) / stride_) {
       throw std::bad_array_new_length{};
     }
@@ -119,39 +107,58 @@ private:
   std::size_t cols_;
   mutable PaddedAlignedVector<double> grid_;
 
+  // This is an internal storage that it defaults to use the quantized version.
   class Grid_Quantized {
   private:
     static constexpr uint32_t QMAX{std::numeric_limits<uint32_t>::max()};
-
-    static constexpr double ERROR_BUDGET{1e-6};
-
-    static constexpr double INITIAL_ERROR_UNITS{2.5};
-    static constexpr double ERROR_UNITS_PER_STEP{0.04};
-
-    PaddedAlignedVector<uint32_t> grid_;
-
+  
+    // My quantization of double to uint32_t is as follows:
+    // Within the grid, store the highest and lowest values. This will be the range of which the quantization
+    // operates. We also note that since the next grid is a weighted average of its surrounding grid, no 
+    // such data would ever leave this range 
     double minimum_{0.0};
     double maximum_{0.0};
 
-    double scale_{0.0};
-    double spacing_{0.0};
-    double error_bound_{0.0};
-    double step_error_{0.0};
-    bool initialized_{false};
+    // With the range in mind, we essentially map every value within that range to a respective uint32_t
+    // by the formula of y = (range / QMAX) * x + minimum where y is the double and x is the uint32_t
+    double scale_{0.0}; // store for QMAX / range 
+    double spacing_{0.0}; // store for range / QMAX 
 
+    // Dervived from bench/main.cpp 
+    static constexpr double ERROR_BUDGET{1e-6};
+    // Initial Error is at most 2.0 since its eitehr than boundary of -unit to +unit of a given
+    // quantized value.
+    static constexpr double INITIAL_ERROR_UNITS{2.0};
+    // The growth is empircally tested. I essentially told AI to generate a bunch of grid
+    // of different ranges then keep reducing this error unit per step until reducing it further would
+    // cause one of the cases to fail. 
+    static constexpr double ERROR_UNITS_PER_STEP{0.04};
+
+    // These are variables to store the error accumulation. 
+    double error_bound_{0.0}; // store for the accumulated error 
+    double step_error_{0.0}; // store for ERROR_UNITS_PER_STEP * spacing 
+    bool initialized_{false}; // store for INTIIAL_ERROR_UNITS * spacing
+
+    PaddedAlignedVector<uint32_t> grid_;
+
+    // friending them since they need to access the quantized values 
     friend class Grid;
     friend class GridView;
     friend void apply_stencil_quantized(const GridView& source, Grid& destination);
 
-  public:
+  private:
     Grid_Quantized(std::size_t rows, std::size_t cols) : grid_{rows, cols} {}
-
-    void record_write(double new_value) {
+    
+    // This is a helper function in the quantizationm process to update the min and max 
+    // within a grid 
+    inline void record_write(double new_value) {
       minimum_ = std::min(minimum_, new_value);
       maximum_ = std::max(maximum_, new_value);
     }
 
-    void inherit_quantization(const Grid_Quantized& source) {
+    // Takes over all the quantization variables from a soruce, this is the used during the 
+    // transfer of the old grid and the next grid  
+    inline void inherit_quantization(const Grid_Quantized& source) {
       minimum_ = source.minimum_;
       maximum_ = source.maximum_;
       scale_ = source.scale_;
@@ -164,19 +171,24 @@ private:
     double minimum() const { return minimum_; }
     double maximum() const { return maximum_; }
 
-    double value(std::size_t row, std::size_t col) const {
+    // Unquantize the grid data 
+    inline double value(std::size_t row, std::size_t col) const {
       return minimum_ + grid_(row, col) * spacing_;
     }
 
+    inline void write(std::size_t row, std::size_t col, double value){
+      grid_(row, col) = static_cast<uint32_t>(scale_ * value - minimum_);
+    }
+
+    // Checks whether the quantized grid can continue before needed to switch to unquantized
     bool can_step() const { return error_bound_ + step_error_ <= ERROR_BUDGET; }
 
+    // Intiailize the quantization
     void initialize(const Grid& owner) {
       if (initialized_) {
         return;
       }
 
-      // a clamp for if the range is 0, this kinda exist so that the existing logic would work
-      // properly under this edge case
       const double range{std::max(maximum_ - minimum_, 1e-20)};
 
       scale_ = static_cast<double>(QMAX) / range;
@@ -200,6 +212,8 @@ private:
       initialized_ = true;
     }
 
+    // Revert the qunatization back to a double by populating the owner grid its original
+    // values 
     void decode(const Grid& owner) const {
       for (std::size_t row{0}; row < owner.rows_; ++row) {
         for (std::size_t col{0}; col < owner.cols_; ++col) {
@@ -209,10 +223,15 @@ private:
     }
   };
 
+  // Mutable since we require to update the internal quantization regardless if it is a 
+  // const reference 
   mutable Grid_Quantized quantized_;
   mutable bool use_quantized_{true};
+
+  // This step count will be useful in a specific operation to reduce the error 
   std::size_t step_count_{0};
 
+  // reverts quantization utilization back to double 
   void switch_to_double() const {
     if (!use_quantized_) {
       return;
@@ -224,6 +243,7 @@ private:
     use_quantized_ = false;
   }
 
+  // Call to prep the quantization or revert if the error bound has exceeded 
   void prepare_quantization() const {
     if (!use_quantized_) {
       return;
@@ -235,18 +255,35 @@ private:
     }
   }
 
+  // Setting a value to the quantized grid or non quantized grid depending on state 
   void set_value(std::size_t row, std::size_t col, double value) {
     if (!std::isfinite(value)) {
       throw std::invalid_argument("Grid values must be finite");
     }
-
-    if (quantized_.initialized_) {
-      switch_to_double();
+    
+    if (quantized_.initialized_ && use_quantized_){
+      // Switch if it breaks the quantization range
+      if (quantized_.maximum_ < value || quantized_.minimum_ > value) {
+        switch_to_double();
+      } else { 
+        // Otherwise, simply write the value in it
+        quantized_.write(row, col, value);
+        return; 
+      }
     }
-    grid_(row, col) = value;
-    if (use_quantized_) {
+    if (use_quantized_){
       quantized_.record_write(value);
     }
+    
+    grid_(row, col) = value;
+  }
+
+  double get_value(std::size_t row, std::size_t col) const {
+    if (use_quantized_ && quantized_.initialized_) {
+      return quantized_.value(row, col);
+    }
+
+    return grid_(row, col);
   }
 
   friend class GridView;
@@ -255,6 +292,7 @@ private:
   friend void apply_stencil(const Grid& old_grid, Grid& new_grid);
 
 public:
+  // Proxy that handle whether the quantized value or non-quantized value be shown. 
   class ConstCellProxy {
   private:
     const Grid& owner_;
@@ -266,11 +304,7 @@ public:
         : owner_{owner}, row_{row}, col_{col} {}
 
     operator double() const {
-      if (owner_.use_quantized_ && owner_.quantized_.initialized_) {
-        return owner_.quantized_.value(row_, col_);
-      }
-
-      return owner_.grid_(row_, col_);
+      return owner_.get_value(row_, col_);
     }
   };
 
@@ -296,8 +330,6 @@ public:
 
   Grid(std::size_t rows, std::size_t cols)
       : rows_{rows}, cols_{cols}, grid_{rows, cols}, quantized_{rows, cols} {
-    // I don't think it make sense to operate on zero dimensionsal grids , so this should be flagged
-    // if attempted to do so
     if (rows == 0 || cols == 0) {
       throw std::invalid_argument("Grid dimensions must be positive");
     }
@@ -306,7 +338,9 @@ public:
   inline std::size_t rows() const { return rows_; }
   inline std::size_t cols() const { return cols_; }
 
-  CellProxy operator()(std::size_t i, std::size_t j) { return CellProxy(*this, i, j); }
+  CellProxy operator()(std::size_t i, std::size_t j) { 
+    return CellProxy(*this, i, j); 
+  }
 
   ConstCellProxy operator()(std::size_t i, std::size_t j) const {
     return ConstCellProxy(*this, i, j);
@@ -353,27 +387,35 @@ public:
   }
 };
 
-// Divide before adding to support the full uint32_t range without overflow.
+// Quantized value implementation. We use the remainder and rounding offset to prevent the error 
+// to have a continued downward shift.
 inline uint32_t quantized_stencil_value(uint32_t center, uint32_t top, uint32_t bottom,
                                        uint32_t left, uint32_t right, uint32_t rounding_offset) {
-  const uint32_t whole{(center >> 1) + (top >> 3) + (bottom >> 3) + (left >> 3) + (right >> 3)};
-  const uint32_t remainder{4u * (center & 1u) + (top & 7u) + (bottom & 7u) +
-                           (left & 7u) + (right & 7u)};
+  
+  // We divide before adding to prevent overflow 
+  const uint32_t whole{center / 2u + top / 8u + bottom / 8u + left / 8u + right / 8u};
+  const uint32_t remainder{4u * (center % 2u) + (top + bottom + left + right) % 8u};
 
-  return whole + ((remainder + rounding_offset) >> 3);
+  return whole + (remainder + rounding_offset) / 8u;
 }
 
+// Stencil implementation for the quantized case
 inline void apply_stencil_quantized(const GridView& source, Grid& destination) {
   const std::size_t rows{source.rows()};
   const std::size_t cols{source.cols()};
   const auto& old{source.quantization()};
-  // Alternate exact halves down and up on successive steps.
-  const uint32_t rounding_offset{3u + static_cast<uint32_t>(source.grid_.step_count_ & 1u)};
+  
+  // This is what the step count is for. In the quantized stencil calculate. We divide the remainder by 8, so 
+  // if the remainder of (remainder + rounding_offset) / 8 is 4 then sometimes we round up, and sometimes we round down. 
+  // This decrease the error rate since at remainder 4 our alternating representation will not be lost. 
+  const uint32_t rounding_offset{3u + static_cast<uint32_t>(source.grid_.step_count_% 2)};
 
+  // inherit next quantization and increase error bound 
   auto& next{destination.quantized_};
   next.inherit_quantization(old);
   next.error_bound_ += next.step_error_;
 
+  // standard stencil implementation.
   std::memcpy(destination.quantized_ptr(0, 0), source.quantized_ptr(0, 0), cols * sizeof(uint32_t));
   std::memcpy(destination.quantized_ptr(rows - 1, 0), source.quantized_ptr(rows - 1, 0),cols * sizeof(uint32_t));
 
@@ -395,6 +437,7 @@ inline void apply_stencil_quantized(const GridView& source, Grid& destination) {
   }
 }
 
+// Regular stencil implementation.
 inline void apply_stencil_impl(const GridView& old_grid, Grid& new_grid) {
   const std::size_t rows{old_grid.rows()};
   const std::size_t cols{old_grid.cols()};
@@ -403,19 +446,15 @@ inline void apply_stencil_impl(const GridView& old_grid, Grid& new_grid) {
     throw std::invalid_argument("Input and output grids must have matching dimensions");
   }
 
-  // Copy logical boundary cells
   std::memcpy(new_grid.ptr(0, 0), old_grid.ptr(0, 0), cols * sizeof(double));
   std::memcpy(new_grid.ptr(rows - 1, 0), old_grid.ptr(rows - 1, 0), cols * sizeof(double));
 
-// Rows have uniform work; static scheduling assigns each output row one writer.
   #pragma omp parallel for schedule(static)
   for (std::size_t i = 1; i < rows - 1; ++i) {
     const double* top{old_grid.ptr(i - 1, 0)};
     const double* mid{old_grid.ptr(i, 0)};
     const double* bottom{old_grid.ptr(i + 1, 0)};
 
-    // Specify out is the only holder of this data within this scope with restrict, permitting
-    // potential compiler optimization without worrying about alias pointers
     double* __restrict out{new_grid.ptr(i, 0)};
 
     out[0] = mid[0];
@@ -428,13 +467,15 @@ inline void apply_stencil_impl(const GridView& old_grid, Grid& new_grid) {
   }
 }
 
-// Apply the five-point stencil over all interior points, copying the boundary
-// values unchanged from old_grid to new_grid. Implement your solution here.
+// this is the entry point and it determines whether we use the quantized or regular version 
 inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
   if (old_grid.rows() != new_grid.rows() || old_grid.cols() != new_grid.cols()) {
     throw std::invalid_argument("Input and output grids must have matching dimensions");
   }
 
+  // Calls the prepare quantization so it would handle the case appropriately of a never quantized grid 
+  // being quantized, quantized grid will retain itself, or quantize grid exceeding error can switch
+  // to not using quantization 
   old_grid.prepare_quantization();
   if (!new_grid.use_quantized_) {
     old_grid.switch_to_double();

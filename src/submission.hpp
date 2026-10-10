@@ -12,12 +12,6 @@
 #include <immintrin.h>
 #endif
 
-// Starter Grid for the 2D heat-diffusion problem.
-//
-// The evaluation harness uses operator() to set initial conditions and to read
-// results; it never touches your internal storage. Keep this interface,
-// everything else is yours.
-
 // Aligns storage to 64 bytes and pads the stride so every row starts aligned.
 template <typename T> class PaddedAlignedVector {
 private:
@@ -27,7 +21,7 @@ private:
   static_assert(CACHE_ALIGNMENT % sizeof(T) == 0);
   static constexpr std::size_t elements_per_line = CACHE_ALIGNMENT / sizeof(T);
 
-  // Allocates vector storage at a 64-byte boundary.
+  // Allocates for an address that is in alignment of 64 byte. Follows the Allocator format for vectors
   template <typename U> class CacheAlignAllocator {
   public:
     using value_type = U;
@@ -37,7 +31,6 @@ private:
     template <typename V>
     CacheAlignAllocator(const CacheAlignAllocator<V>&) noexcept {}
 
-    // Vector compares allocators when copying a grid.
     template <typename V>
     bool operator==(const CacheAlignAllocator<V>&) const noexcept {
       return true;
@@ -62,21 +55,23 @@ private:
     }
   };
 
-  // Physical row spacing includes padding; callers address logical cells only.
+  // The *real* columns length of the vector that is essentially ceil(sizeof(T) * column / 64) * 64 
+  // Paired with the 64 bytes address alignment, this padding ensures that the data retrieval will not
+  // need to access data from previous or next rows for the first and last group of data along a row 
   std::size_t stride_;
 
   std::vector<T, CacheAlignAllocator<T>> storage_;
 
 public:
   PaddedAlignedVector(std::size_t rows, std::size_t cols) : stride_{0} {
-    constexpr auto max_size{std::numeric_limits<std::size_t>::max()};
+    constexpr std::size_t max_size{std::numeric_limits<std::size_t>::max()};
     if (cols > max_size - (elements_per_line - 1)) {
       throw std::bad_array_new_length{};
     }
 
+    // Essentially ceil(sizeof(T) * column / 64) * 64
     stride_ = (cols + elements_per_line - 1) / elements_per_line * elements_per_line;
 
-    // Check the total byte size before multiplying either dimension.
     if (stride_ != 0 && rows > (max_size / sizeof(T)) / stride_) {
       throw std::bad_array_new_length{};
     }
@@ -99,7 +94,9 @@ public:
   }
 };
 
-// Rectangle containing the nonzero cells. The end row and column are excluded.
+// This is a sample structure created to keep track of the active area (non-zero section) expanding
+// from the heatmap within a rectangular area. It is rectangular because it is cheap to calculate 
+// its expansion rather than some complex structure to describe any potential complex geometry. 
 struct ActiveArea {
   std::size_t first_row{0}, end_row{0};
   std::size_t first_col{0}, end_col{0};
@@ -117,7 +114,9 @@ struct ActiveArea {
     }
   }
 
-  // Grow by one cell on each side, stopping at the grid edges.
+  // By the formula, it is only poossible that the active area grows by one grid around the 
+  // existing active area. Thus, this expands the active area boundary by 1 on all 4 sides if
+  // not at the grid boundary. 
   void expand(std::size_t rows, std::size_t cols) {
     if (empty()) {
       return;
@@ -131,15 +130,24 @@ struct ActiveArea {
 
 class GridView;
 
+//Class for containing the heatmap data 
 class Grid {
 private:
+  // Grid information 
   std::size_t rows_;
   std::size_t cols_;
   PaddedAlignedVector<double> grid_;
+
+  // We have to make this mutable because we need to scan an intiail grid under a const
+  // reference. We keep it as a grid state since std::swap is done in the benchmark
+  // after each iteration, meaning keeping it lets us avoid the costly recacluation of finding
+  // the active area
   mutable ActiveArea active_{};
+  // We assume this as false because by default the grid starts will all zero
   mutable bool active_dirty_{false};
 
-  // Rebuild bounds once after external writes. Stencil steps need no scan.
+  // Finds the active area on a grid only if the active is dirty, meaning the grid data has 
+  // been manipulated.
   void detect_active_area() const {
     if (!active_dirty_) return;
     active_ = {};
@@ -151,12 +159,13 @@ private:
     active_dirty_ = false;
   }
 
-  // Clear old destination values only where the next update won't overwrite them.
+  // To reset a grid back to all zero, we only infer upon clearing its active area outside of the other grid's 
+  // active area that our stencil is reading upon. Since active area cannot decrease, it is not necessary to clear
+  // data within the other's active area as they would be overwritten by our stencil. 
   void clear_stale_values(const ActiveArea& next) {
     detect_active_area();
-    const ActiveArea previous{active_};
+    const ActiveArea& previous{active_};
 
-    // detect for either empty or greater overlap
     if (previous.empty() ||
         (!next.empty() && next.first_row <= previous.first_row &&
          next.end_row >= previous.end_row && next.first_col <= previous.first_col &&
@@ -164,7 +173,6 @@ private:
       return;
     }
 
-    // reset stale grid 
     for (std::size_t row = previous.first_row; row < previous.end_row; ++row) {
       for (std::size_t col = previous.first_col; col < previous.end_col; ++col) {
         if (row < next.first_row || row >= next.end_row ||
@@ -175,11 +183,18 @@ private:
     }
   }
 
+  // Friend because they need access to the 2 private methods that is only for our stencil calculation
   friend class GridView;
   friend void apply_stencil_impl(const GridView& source, Grid& destination);
 
 public:
-  // External assignments request a bounds refresh before the grid is used.
+
+  // This proxy is for determining whether a mutable reference sent out is really being used
+  // for mutation to determine whether the active area is dirty. It's not super 
+  // necessary since you could set it as dirty if the ref is sent like many others have 
+  // done, but resetting the grid is potentially expensive since it requires additional 
+  // memory access 
+
   class CellProxy {
     Grid& owner_;
     std::size_t row_, col_;
@@ -200,8 +215,9 @@ public:
 
   Grid(std::size_t rows, std::size_t cols)
       : rows_{rows}, cols_{cols}, grid_{rows, cols} {}
-  std::size_t rows() const { return rows_; }
-  std::size_t cols() const { return cols_; }
+
+  const std::size_t& rows() const {return rows_;}
+  const std::size_t& cols() const {return cols_;}
 
   CellProxy operator()(std::size_t row, std::size_t col) {
     return {*this, row, col};
@@ -211,37 +227,40 @@ public:
   }
 };
 
-// Read-only access to an existing grid, with a snapshot of its active bounds.
-// Coordinates stay global. Recreate the view after changing the grid's bounds.
+// Read-only access to an existing grid. Frankly, I only did this because of the criteria. Little 
+// confused as to why since const ref exist. Perhaps a Rust reference? 
 class GridView {
   const Grid& grid_;
-  ActiveArea active_;
+  ActiveArea& active_;
 
+  // made it friend so it can access the field active_
   friend void apply_stencil_impl(const GridView& source, Grid& destination);
 
 public:
-  explicit GridView(const Grid& grid) : grid_{grid} {
+  explicit GridView(const Grid& grid) : grid_{grid}, active_(grid.active_) {
     grid.detect_active_area();
-    active_ = grid.active_;
   }
 
   std::size_t rows() const { return grid_.rows(); }
   std::size_t cols() const { return grid_.cols(); }
-  std::size_t first_row() const { return active_.first_row; }
-  std::size_t end_row() const { return active_.end_row; }
-  std::size_t first_col() const { return active_.first_col; }
-  std::size_t end_col() const { return active_.end_col; }
-  bool empty() const { return active_.empty(); }
 
-  const double* ptr(std::size_t row, std::size_t col) const {
+  inline const double* ptr(std::size_t row, std::size_t col) const {
     return grid_.grid_.ptr(row, col);
   }
-  double operator()(std::size_t row, std::size_t col) const {
+  inline double operator()(std::size_t row, std::size_t col) const {
     return grid_(row, col);
   }
 };
 
-// Use AVX when enabled at compile time, then finish with the regular formula.
+// Updates along a row of the stencil code. Explicitly uses AVX (4 row update at a time) and leave it
+// to pragma simd when not possible. 
+//
+// A Note: 
+//
+// SIMD doesn't actually affect performance much in this stencil kernel from testing with or without. 
+// It's probably because reading or storing into memory takes 100s of clock cycles while the actual operation 
+// only takes maybe a few, so making your operations faster probably doesn't matter when 99% of the time is in
+// memory read/write. 
 inline void update_row(const double* top, const double* mid,
                        const double* bottom, double* out,
                        std::size_t col, std::size_t end_col) {
@@ -251,10 +270,10 @@ inline void update_row(const double* top, const double* mid,
 
   for (; col + 4 <= end_col; col += 4) {
     const __m256d center{_mm256_loadu_pd(mid + col)};
-    __m256d neighbors = _mm256_add_pd(_mm256_loadu_pd(top + col),
-                                     _mm256_loadu_pd(bottom + col));
+    __m256d neighbors = _mm256_add_pd(_mm256_loadu_pd(top + col), _mm256_loadu_pd(bottom + col));
     neighbors = _mm256_add_pd(neighbors, _mm256_loadu_pd(mid + col - 1));
     neighbors = _mm256_add_pd(neighbors, _mm256_loadu_pd(mid + col + 1));
+
     const __m256d result =
         _mm256_add_pd(_mm256_mul_pd(center_weight, center),
                       _mm256_mul_pd(neighbor_weight, neighbors));
@@ -262,14 +281,14 @@ inline void update_row(const double* top, const double* mid,
   }
 #endif
 
-  // either calculate what remains or calculate the entire row if AVX not enabled 
+  // Either calculate what remains or calculate the entire row if AVX not enabled 
   #pragma omp simd
   for (std::size_t i = col; i < end_col; ++i) {
     out[i] = 0.5 * mid[i] + 0.125 * (top[i] + bottom[i] + mid[i - 1] + mid[i + 1]);
   }
 }
 
-// Update into a separate grid, clearing stale destination values when needed.
+// Actual stencil kernel implementation
 inline void apply_stencil_impl(const GridView& input, Grid& destination) {
   const std::size_t rows{input.rows()}, cols{input.cols()};
 
@@ -279,10 +298,13 @@ inline void apply_stencil_impl(const GridView& input, Grid& destination) {
   destination.clear_stale_values(next);
   destination.active_ = next;
   destination.active_dirty_ = false;
+  
   if (next.empty()) {
     return;
   }
 
+  // This is for the later update row, but we put it here since this gets re-used
+  // We clamp it because update_row should not operate on column boundaries 
   const std::size_t first_col{std::max(next.first_col, std::size_t{1})};
   const std::size_t end_col{std::min(next.end_col, cols - 1)};
   const std::size_t width{next.end_col - next.first_col};
@@ -305,11 +327,19 @@ inline void apply_stencil_impl(const GridView& input, Grid& destination) {
       out[cols - 1] = mid[cols - 1];
     }
 
-    update_row(input.ptr(row - 1, 0), mid, input.ptr(row + 1, 0), out, first_col, end_col);
+    update_row(
+      input.ptr(row - 1, 0), 
+      mid,
+      input.ptr(row + 1, 0), 
+      out, 
+      first_col, 
+      end_col
+    );
   }
 }
 
 inline void apply_stencil(const Grid& source, Grid& destination) {
+  //Sanity checks.
   if (source.rows() != destination.rows() || source.cols() != destination.cols()) {
     throw std::invalid_argument("Grid dimensions must match");
   }
