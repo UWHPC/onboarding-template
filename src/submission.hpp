@@ -53,12 +53,21 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid)  {
     new_data[(old_rows-1)*old_cols + j] = old_data[(old_rows-1)*old_cols + j];
   }
 
-  #pragma omp parallel for
+  // Assign interior rows to threads (static since uniform)
+  #pragma omp parallel for schedule(static)
   for (std::size_t i = 1; i < old_rows-1; ++i) {
     const double* old_row{old_data + i*old_cols};
     double* new_row{new_data + i*old_cols};
 
-    for (std::size_t j = 1; j < old_cols-1; ++j) {
+    // Already know that boundary values will not change
+    new_row[0] = old_row[0];
+    if (old_cols > 1) {
+      new_row[old_cols - 1] = old_row[old_cols - 1];
+    }
+
+    // Compute interior cells only
+    #pragma omp simd
+    for (std::size_t j = 1; j < old_cols - 1; ++j) {
       new_row[j] = 0.5 * old_row[j] + 0.125 * (old_row[j-old_cols] + old_row[j+old_cols] + old_row[j-1] + old_row[j+1]);
     }
   }
