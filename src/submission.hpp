@@ -17,6 +17,7 @@ private:
 public:
   Grid(std::size_t rows, std::size_t cols): rows_{rows}, cols_{cols}, grid(rows * cols) {}
 
+  // rows and cols come together
   std::pair<std::size_t, std::size_t> getDimensions() const {
     return {rows_, cols_};
   }
