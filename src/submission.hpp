@@ -302,7 +302,7 @@ inline void apply_stencil_impl(const GridView& input, Grid& destination) {
   const std::size_t end_col{std::min(next.end_col, cols - 1)};
   const std::size_t width{next.end_col - next.first_col};
 
-  #pragma omp parallel for schedule(static) if(next.end_row - next.first_row > 128)
+  #pragma omp parallel for schedule(static)
   for (std::size_t row = next.first_row; row < next.end_row; ++row) {
     const double* mid{input.ptr(row, 0)};
     double* __restrict out{destination.grid_.ptr(row, 0)};
