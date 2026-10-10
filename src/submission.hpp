@@ -230,7 +230,7 @@ public:
 // Read-only access to an existing grid. Frankly, I only did this because of the criteria. Little 
 // confused as to why since const ref exist. Perhaps a Rust reference? 
 class GridView {
-  const Grid& grid_;
+  const Grid& grid_;  
   ActiveArea& active_;
 
   // made it friend so it can access the field active_
@@ -254,15 +254,8 @@ public:
 
 // Updates along a row of the stencil code. Explicitly uses AVX (4 row update at a time) and leave it
 // to pragma simd when not possible. 
-//
-// A Note: 
-//
-// SIMD doesn't actually affect performance much in this stencil kernel from testing with or without. 
-// It's probably because reading or storing into memory takes 100s of clock cycles while the actual operation 
-// only takes maybe a few, so making your operations faster probably doesn't matter when 99% of the time is in
-// memory read/write. 
 inline void update_row(const double* top, const double* mid,
-                       const double* bottom, double* out,
+                       const double* bottom, double* __restrict out,
                        std::size_t col, std::size_t end_col) {
 #ifdef __AVX__
   const __m256d center_weight{_mm256_set1_pd(0.5)};
