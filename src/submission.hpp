@@ -104,7 +104,8 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         out[0] = center[0];
 
         // Compute interior cells
-        for (std::size_t j = 1; j + 1 < cols; ++j) {
+        #pragma omp simd
+        for (std::size_t j = 1; j < cols - 1; ++j) {
             out[j] =
                 0.5 * center[j]
                 + 0.125 * (
