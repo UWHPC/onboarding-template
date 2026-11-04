@@ -91,8 +91,9 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
         new_grid.row_data(rows - 1)
     );
 
-    // Process all rows between the top and bottom
-    for (std::size_t i = 1; i + 1 < rows; ++i) {
+    // Distribute independent interior rows across threads
+    #pragma omp parallel for schedule(static)
+    for (std::size_t i = 1; i < rows - 1; ++i) {
 
         const double* north  = old_grid.row_data(i - 1);
         const double* center = old_grid.row_data(i);
